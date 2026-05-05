@@ -1,0 +1,48 @@
+{
+  "version": 1,
+
+  "storage_paths": {
+    "base_dir_relative_to_config": true,
+    "pdf_roots": ["books"],
+    "library_core_db_path": "./library_core.db",
+    "user_activity_db_path": "./user_activity.db",
+    "vector_store_path": "./vector_store",
+    "assets_path": "./assets"
+  },
+
+  "llms": {
+    "extraction_model": {
+      "provider": "ollama",
+      "model_name": "llama3.2",
+      "temperature": 0.1,
+      "max_tokens": 1024,
+      "timeout_seconds": 60,
+      "base_url": "http://localhost:11434"
+    },
+    "embedding_model": {
+      "provider": "ollama",
+      "model_name": "nomic-embed-text",
+      "dimension": 768,
+      "base_url": "http://localhost:11434"
+    },
+    "chat_model": {
+      "provider": "anthropic",
+      "model_name": "claude-sonnet-4-6",
+      "temperature": 0.7,
+      "max_tokens": 2048,
+      "timeout_seconds": 120,
+      "api_key": "YOUR_ANTHROPIC_API_KEY"
+    }
+  },
+
+  "search_settings": {
+    "top_k": 10,
+    "max_pages_to_analyze": 20
+  },
+
+  "ocr": {
+    "enabled": true,
+    "provider": "paddleocr",
+    "min_chars_threshold": 50
+  }
+}

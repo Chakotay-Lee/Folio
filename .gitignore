@@ -1,0 +1,29 @@
+# Runtime config (contains API keys and local paths)
+config.json
+
+# Data files
+*.db
+vector_store/
+assets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# AI tool workspaces
+.agent/
+.claude/
+.codex/
+.gemini/
+.opencode/
+openspec/
+
+# macOS
+.DS_Store
