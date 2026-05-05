@@ -6,6 +6,18 @@ A self-hosted personal library system. Drop your PDF, EPUB, TXT, and Markdown fi
 
 ---
 
+> [!WARNING]
+> **Token Usage — Local LLM Strongly Recommended**
+>
+> Folio calls an LLM for **every book** it processes to extract metadata (title, author, summary, tags, and genre). On a large library this can consume a significant number of tokens. Using a commercial API such as OpenAI or Anthropic may result in unexpected costs.
+> **Running a local model via [Ollama](https://ollama.ai) is strongly recommended.**
+>
+> **OCR requires a vision-capable (multimodal) model**
+>
+> The optional OCR feature sends page images to an LLM to extract text from scanned or image-only PDFs. This requires a model that supports **image input** — a text-only model will not work. Recommended options include [Qwen2-VL](https://ollama.ai/library/qwen2-vl), Gemma 3/4, LLaVA, or any other multimodal model available through your provider.
+
+---
+
 ## Features
 
 - **Auto-ingestion** — watches configured folders and processes new files automatically
