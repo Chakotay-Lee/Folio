@@ -23,7 +23,7 @@ export function EpubReaderPage() {
 
     api.get<BookMeta>(`/books/${uuid}`).then(setMeta).catch(() => {})
 
-    const book = Epub(`/api/books/${uuid}/file?mode=inline`)
+    const book = Epub(`/api/books/${uuid}/file?mode=inline`, { openAs: 'epub' })
     bookRef.current = book
 
     const rendition = book.renderTo(viewerRef.current, {
