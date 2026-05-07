@@ -76,35 +76,39 @@ def extract_scanned_images(
     page_w: int,
     page_h: int,
 ) -> list[ImageRecord]:
-    """Use VLM to detect figure bounding boxes, then crop them from the page image."""
+    """Use VLM to detect figure bounding boxes and descriptions in one call, then crop."""
     from PIL import Image
 
     prompt = (
         f"The image is {page_w}×{page_h} pixels. "
         "List all figures, diagrams, charts, or photographs visible in this page — NOT text paragraphs or captions. "
-        "For each figure, return its bounding box in JSON format: "
-        '[{"bbox_2d": [x1, y1, x2, y2], "label": "short description"}, ...]. '
-        f"All coordinates must be integer pixel values in the range 0–{page_w} (x) and 0–{page_h} (y). "
-        "If there are no figures, return an empty array []."
+        "For each figure return a JSON object with three fields: "
+        '"bbox_2d" ([x1, y1, x2, y2] integer pixel coordinates), '
+        '"label" (a short title), and '
+        '"description" (1–3 sentences describing the figure for a reader\'s reference). '
+        "Return a JSON array of these objects. "
+        f"All coordinates must be integers in range 0–{page_w} (x) and 0–{page_h} (y). "
+        "If there are no figures, return []."
     )
 
     img_b64 = _pil_to_b64(page_img)
     raw_text = _call_vlm(llm_provider, prompt, img_b64)
     log.debug("VLM bbox raw response (page %d): %s", page_number, raw_text[:600])
 
-    boxes = _parse_bbox_response(raw_text, page_w, page_h)
-    log.debug("Parsed boxes (page %d, image %dx%d): %s", page_number, page_w, page_h, boxes)
+    detections = _parse_bbox_response(raw_text, page_w, page_h)
+    log.debug("Parsed detections (page %d, image %dx%d): %s", page_number, page_w, page_h,
+              [(d["bbox"], d["description"][:40]) for d in detections])
     records: list[ImageRecord] = []
 
-    for box in boxes:
-        x1, y1, x2, y2 = box
+    for det in detections:
+        x1, y1, x2, y2 = det["bbox"]
         if (x2 - x1) < MIN_FIGURE_DIM or (y2 - y1) < MIN_FIGURE_DIM:
-            log.debug("Skipping tiny box %s on page %d", box, page_number)
+            log.debug("Skipping tiny box %s on page %d", det["bbox"], page_number)
             continue
         try:
             cropped = page_img.crop((x1, y1, x2, y2))
         except Exception as e:
-            log.warning("Crop failed for box %s on page %d: %s", box, page_number, e)
+            log.warning("Crop failed for box %s on page %d: %s", det["bbox"], page_number, e)
             continue
 
         img_counter[0] += 1
@@ -115,7 +119,8 @@ def extract_scanned_images(
         records.append(ImageRecord(
             filename=filename,
             page=page_number,
-            bbox=list(box),
+            bbox=list(det["bbox"]),
+            description=det["description"],
         ))
 
     return records
@@ -181,14 +186,18 @@ def _call_vlm(provider, prompt: str, img_b64: str) -> str:
     return resp.json()["choices"][0]["message"]["content"] or ""
 
 
-def _parse_bbox_response(text: str, page_w: int, page_h: int) -> list[tuple[int, int, int, int]]:
-    """Extract valid bounding boxes from VLM response text.
+def _parse_bbox_response(
+    text: str, page_w: int, page_h: int
+) -> list[dict]:
+    """Parse VLM response into a list of {"bbox": (x1,y1,x2,y2), "description": str} dicts.
 
-    Some VLMs (Qwen2-VL style) return coordinates normalized to 0–1000 regardless
-    of actual image size.  Detect this by checking whether all coords fit in 0–1000
-    while the image is larger, then scale to pixel space.
+    Handles:
+    - Pixel coordinates (direct use)
+    - 0–1000 normalized (Qwen2-VL style): auto-detected and scaled when image >1000px
+    - 0.0–1.0 float normalized (LLaVA style): auto-detected and scaled
+    - Markdown ```json ... ``` wrappers
     """
-    # Find JSON array in response (handles markdown ```json ... ``` wrappers)
+    # Find JSON array in response
     start = text.find("[")
     end = text.rfind("]") + 1
     if start == -1 or end == 0:
@@ -199,53 +208,52 @@ def _parse_bbox_response(text: str, page_w: int, page_h: int) -> list[tuple[int,
     except json.JSONDecodeError:
         return []
 
-    raw_boxes: list[tuple[int, int, int, int]] = []
+    # Collect raw float values and descriptions before converting to int
+    raw: list[tuple[float, float, float, float, str]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
-        # Support bbox_2d (Qwen native), bbox, and bounding_box keys
         raw_box = item.get("bbox_2d") or item.get("bbox") or item.get("bounding_box")
         if not raw_box or len(raw_box) != 4:
             continue
         try:
-            x1, y1, x2, y2 = (int(round(float(v))) for v in raw_box)
+            fx1, fy1, fx2, fy2 = (float(v) for v in raw_box)
         except (TypeError, ValueError):
             continue
-        if x1 >= x2 or y1 >= y2:
+        if fx1 >= fx2 or fy1 >= fy2:
             continue
-        raw_boxes.append((x1, y1, x2, y2))
+        desc = str(item.get("description") or item.get("label") or "").strip()
+        raw.append((fx1, fy1, fx2, fy2, desc))
 
-    if not raw_boxes:
+    if not raw:
         return []
 
-    # Detect 0-1000 normalized coordinates: if image is large (>1000px in either
-    # dimension) but all coordinates are ≤ 1000, the VLM used normalized space.
-    needs_scale = (page_w > 1000 or page_h > 1000) and all(
-        x1 >= 0 and y1 >= 0 and x2 <= 1000 and y2 <= 1000
-        for x1, y1, x2, y2 in raw_boxes
-    )
+    # Detect coordinate space from max value across all boxes
+    max_coord = max(max(fx2, fy2) for fx1, fy1, fx2, fy2, _ in raw)
 
-    boxes: list[tuple[int, int, int, int]] = []
-    for x1, y1, x2, y2 in raw_boxes:
-        if needs_scale:
-            x1 = int(round(x1 * page_w / 1000))
-            y1 = int(round(y1 * page_h / 1000))
-            x2 = int(round(x2 * page_w / 1000))
-            y2 = int(round(y2 * page_h / 1000))
+    if max_coord <= 1.0:
+        # 0.0–1.0 float normalized (LLaVA / relative coords)
+        scale_x, scale_y = page_w, page_h
+    elif max_coord <= 1000 and page_w > 1000 and page_h > 1000:
+        # 0–1000 normalized (Qwen2-VL style): both dims must exceed 1000 to avoid
+        # false positives on images that are just slightly taller than 1000px.
+        scale_x, scale_y = page_w / 1000, page_h / 1000
+        log.debug("Detected 0-1000 normalized coords, scaling to %dx%d", page_w, page_h)
+    else:
+        # Already pixel coordinates
+        scale_x, scale_y = 1.0, 1.0
 
-        # Clamp to image bounds
-        x1 = max(0, min(x1, page_w))
-        y1 = max(0, min(y1, page_h))
-        x2 = max(0, min(x2, page_w))
-        y2 = max(0, min(y2, page_h))
+    results: list[dict] = []
+    for fx1, fy1, fx2, fy2, desc in raw:
+        x1 = max(0, min(int(round(fx1 * scale_x)), page_w))
+        y1 = max(0, min(int(round(fy1 * scale_y)), page_h))
+        x2 = max(0, min(int(round(fx2 * scale_x)), page_w))
+        y2 = max(0, min(int(round(fy2 * scale_y)), page_h))
 
         if x1 >= x2 or y1 >= y2:
-            log.debug("Degenerate bbox after clamping, discarded")
+            log.debug("Degenerate bbox after scaling/clamping, discarded")
             continue
 
-        boxes.append((x1, y1, x2, y2))
+        results.append({"bbox": (x1, y1, x2, y2), "description": desc})
 
-    if needs_scale:
-        log.debug("Scaled %d boxes from 0-1000 → %dx%d pixel space", len(boxes), page_w, page_h)
-
-    return boxes
+    return results
