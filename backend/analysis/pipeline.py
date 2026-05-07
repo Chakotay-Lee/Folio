@@ -159,10 +159,11 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg) -> None:
             if ch_idx is not None:
                 ch_texts[ch_idx] = ch_texts.get(ch_idx, "") + (ocr_text or "") + "\n"
 
-            # Describe extracted images
+            # Describe extracted images (scanned pages already have descriptions from bbox call)
             for img_rec in page_images:
-                img_path = images_dir / img_rec.filename
-                describe_image(img_path, analysis_provider, img_rec)
+                if not img_rec.description:
+                    img_path = images_dir / img_rec.filename
+                    describe_image(img_path, analysis_provider, img_rec)
                 img_rec.model_used = analysis_model_cfg.model_name
                 all_images.append(img_rec)
 
