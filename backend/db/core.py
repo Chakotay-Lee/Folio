@@ -17,6 +17,16 @@ def init_core_db(db_path: Path) -> None:
 
     from backend.models.book import Book  # noqa: F401
     SQLModel.metadata.create_all(_engine)
+    _run_migrations(_engine)
+
+
+def _run_migrations(engine) -> None:
+    """Add columns introduced after initial schema creation."""
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(books)"))}
+        if "analysis_status" not in cols:
+            conn.execute(text("ALTER TABLE books ADD COLUMN analysis_status TEXT NOT NULL DEFAULT 'none'"))
+            conn.commit()
 
 
 def get_core_session() -> Session:

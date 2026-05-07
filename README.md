@@ -1,4 +1,4 @@
-# Folio — Smart Personal Library
+# Folio — Smart Personal Library `v0.2.0`
 
 **Languages:** English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -29,7 +29,28 @@ A self-hosted personal library system. Drop your PDF, EPUB, TXT, and Markdown fi
 - **Book upload** — drag-and-drop or file picker to add books from the browser
 - **i18n UI** — interface language switchable between English, 繁體中文, 简体中文, 日本語
 - **AI output language** — summary, tags, and genre can be generated in any supported language
-- **OCR support** — optional PaddleOCR pass for scanned/image-only PDFs
+- **OCR support** — optional VLM-based OCR pass for scanned/image-only PDFs; uses the configured `analysis_model` (or `extraction_model`) to extract text from page images
+- **Deep analysis** — manually trigger per-book AI pipeline: chapter detection, full-text extraction, figure extraction (native PDF via PyMuPDF; scanned PDF via VLM bounding box), per-figure descriptions, chapter summaries, and self-contained HTML export. Configure `llms.analysis_model` in `config.json` (defaults to `extraction_model`).
+- **Book Chat** — RAG-based conversational Q&A with any analyzed book. Chapter **summaries** are sent as baseline context; full chapter text is fetched on demand via **tool calling**, keeping token usage low even for large books. Figures are referenced by ID and rendered inline. Persistent sessions stored locally.
+- **TTS** — Generate audio from chapter summaries or full chapter text. Supports **OpenAI TTS API** (models: `tts-1`/`tts-1-hd`; voices: alloy, echo, fable, onyx, nova, shimmer) and **local binary** engines (Piper, Kokoro, or any stdin→stdout MP3 binary). Configure in Settings. Access via the book detail panel → **Analysis & TTS**.
+
+---
+
+## Deep Analysis & Book Chat
+
+Folio can do more than index your books — it can **read and discuss them with you**.
+
+After triggering a deep analysis on a book, Folio runs a full AI pipeline:
+
+1. **Chapter detection** — identifies chapter boundaries across the whole PDF
+2. **Text extraction** — extracts full text per chapter (VLM OCR for scanned pages)
+3. **Figure extraction** — locates and crops embedded images; generates a description for each
+4. **Chapter summaries** — produces a ≤300-word summary per chapter using the configured LLM
+5. **HTML export** — bundles the summaries, figures, and metadata into a self-contained HTML file
+
+Once analysis is complete, open **Book Chat** to have a conversation with the AI about the book. The AI receives chapter summaries as baseline context and fetches full chapter text on demand via tool calling — keeping token usage low while still being able to answer detailed questions. Extracted figures are displayed inline when referenced.
+
+> **Recommended model for deep analysis:** A **multimodal (vision-capable)** model is required for figure extraction and OCR on scanned PDFs. Currently, **Qwen2-VL / Qwen3** (e.g. `qwen2-vl:7b` via Ollama) provides the best results for both figure detection and text accuracy.
 
 ---
 
@@ -45,7 +66,7 @@ Library/
 │   │   ├── extractor.py   # text extraction (PDF/EPUB/TXT/MD)
 │   │   ├── cover.py       # cover image extraction
 │   │   ├── dedup.py       # SimHash near-duplicate check
-│   │   └── ocr.py         # optional PaddleOCR
+│   │   └── ocr.py         # optional VLM OCR
 │   ├── llm/
 │   │   ├── prompts.py     # multilingual extraction prompt builder
 │   │   ├── openai_provider.py
@@ -128,12 +149,6 @@ cd backend
 uv sync
 ```
 
-Optional OCR support:
-
-```bash
-uv sync --extra ocr
-```
-
 ### 3. Install frontend dependencies
 
 ```bash
@@ -176,9 +191,16 @@ Open **http://localhost:5200** in your browser.
 | `llms.extraction_model` | LLM used for metadata extraction | — |
 | `llms.embedding_model` | Model used for semantic embeddings | — |
 | `llms.chat_model` | Model used for chat features | — |
+| `llms.analysis_model` | VLM used for deep analysis (figure extraction, OCR, descriptions). Falls back to `extraction_model` if unset | — |
+| `tts.provider` | TTS engine: `openai` or `local` | `"openai"` |
+| `tts.model` | OpenAI TTS model (`tts-1` or `tts-1-hd`) | `"tts-1"` |
+| `tts.voice` | OpenAI voice (`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`) | `"alloy"` |
+| `tts.api_key` | OpenAI API key for TTS | `""` |
+| `tts.binary_path` | Path to local TTS binary (for `provider: local`) | `""` |
+| `tts.chunk_size` | Max characters per TTS request | `4000` |
 | `search_settings.top_k` | Number of semantic search results | `10` |
 | `search_settings.max_pages_to_analyze` | Pages read during text extraction | `20` |
-| `ocr.enabled` | Enable PaddleOCR for image-only PDFs | `true` |
+| `ocr.enabled` | Enable VLM-based OCR for image-only PDFs | `true` |
 | `ocr.min_chars_threshold` | Character count below which OCR is triggered | `50` |
 | `default_open_mode` | How books open: `system`, `browser`, `download` | `"system"` |
 | `content_language` | Language for AI-generated content: `en`, `zh-TW`, `zh-CN`, `ja` | `"en"` |
@@ -201,7 +223,7 @@ LLM provider fields (for each of `extraction_model`, `embedding_model`, `chat_mo
 
 | Format | Text extraction | Cover extraction |
 |---|---|---|
-| PDF | PyMuPDF (+ optional OCR) | First page render |
+| PDF | PyMuPDF (+ optional VLM OCR) | First page render |
 | EPUB | ebooklib | Cover image from manifest |
 | TXT | Direct read | — |
 | Markdown | Direct read | — |
@@ -247,6 +269,7 @@ All persistent data lives alongside `config.json` by default:
 | `user_activity.db` | SQLite — reading activity |
 | `vector_store/` | ChromaDB — embedding index |
 | `assets/` | Extracted cover images |
+| `analysis/{book-uuid}/` | Per-book deep analysis: chapter text, summaries, extracted figures, audio cache, HTML export |
 
 To move the data directory, set `storage_paths.*` in `config.json` to absolute paths.
 
@@ -255,6 +278,16 @@ To move the data directory, set `storage_paths.*` in `config.json` to absolute p
 ## Re-indexing
 
 If you change the embedding model, the existing vector index becomes incompatible. Go to **Settings → Re-index** (or `POST /api/reindex`) to rebuild it. The existing SQLite book records are preserved; only the ChromaDB index is rebuilt on next scan.
+
+---
+
+## Known Issues
+
+| Issue | Detail |
+|---|---|
+| Figure extraction accuracy on scanned PDFs | Figure boundary detection on scanned pages relies on VLM bounding-box inference, which can misidentify regions or miss figures entirely. Native (text-layer) PDFs are more reliable. |
+| Recommended model for figures | **Qwen2-VL / Qwen3** currently gives the highest figure detection accuracy among tested models. Other VLMs (LLaVA, Gemma) may produce more errors. |
+| Large book token usage | Deep analysis processes every page sequentially. Very large books (500+ pages) may take significant time and tokens depending on the model and provider. |
 
 ---
 

@@ -10,6 +10,8 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { DevPage } from '@/pages/DevPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { EpubReaderPage } from '@/pages/EpubReaderPage'
+import { AnalysisPage } from '@/pages/AnalysisPage'
+import { ChatPage } from '@/pages/ChatPage'
 
 export default function App() {
   return (
@@ -25,6 +27,9 @@ export default function App() {
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="dev" element={<DevPage />} />
+            <Route path="books/:uuid/analysis" element={<AnalysisPage />} />
+            <Route path="books/:uuid/chat" element={<ChatPage />} />
+            <Route path="books/:uuid/chat/:sessionId" element={<ChatPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { BookOpen, ChevronDown } from 'lucide-react'
+import { BookOpen, ChevronDown, CheckCircle2, AlertTriangle, Loader2, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { parseTags, tagColor } from '@/lib/bookUtils'
 import { BookCover } from '@/components/BookCover'
 import { GenreTreeNode } from '@/components/GenreTreeNode'
+import { GenreExpandModal } from '@/components/GenreExpandModal'
+import { BookDetailModal, type DetailBook } from '@/components/BookDetailModal'
 import { Pagination } from '@/components/Pagination'
 import { buildGenreTree } from '@/lib/genreTree'
 import { useLang } from '@/lib/LangContext'
@@ -13,6 +15,7 @@ type Book = {
   id: string; title: string; author: string | null
   genre_path: string | null; tags_json: string | null
   file_format: string; summary: string | null; created_at: string
+  analysis_status?: string
 }
 type BooksPage = { items: Book[]; total: number; page: number; pages: number }
 type TagEntry = { tag: string; count: number }
@@ -36,7 +39,9 @@ export function NotesPage() {
   const [loading, setLoading] = useState(false)
 
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [detailBook, setDetailBook] = useState<DetailBook | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [expandingGenre, setExpandingGenre] = useState<string | null>(null)
 
   // Load sidebar data + config once
   useEffect(() => {
@@ -98,6 +103,7 @@ export function NotesPage() {
   }
   const updateBook = (updated: { id: string }) => {
     setBooks(bs => bs.map(b => b.id === updated.id ? { ...b, ...updated } : b))
+    api.get<GenreEntry[]>('/books/genres').then(setGenreData).catch(() => {})
   }
 
   return (
@@ -118,7 +124,8 @@ export function NotesPage() {
             {genreTree.map(node => (
               <GenreTreeNode key={node.fullPath} node={node}
                 selected={selectedGenrePath}
-                onSelect={handleGenreSelect} />
+                onSelect={handleGenreSelect}
+                onExpand={setExpandingGenre} />
             ))}
           </div>
 
@@ -205,9 +212,33 @@ export function NotesPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start gap-2">
                         <p className="font-semibold text-slate-800 flex-1 leading-snug">{book.title}</p>
+                        {book.analysis_status === 'analyzing' && (
+                          <span title={t('analysis.status.analyzing') as string}>
+                            <Loader2 className="shrink-0 w-3.5 h-3.5 text-amber-500 animate-spin mt-0.5" />
+                          </span>
+                        )}
+                        {book.analysis_status === 'done' && (
+                          <span title={t('analysis.status.done') as string}>
+                            <CheckCircle2 className="shrink-0 w-3.5 h-3.5 text-emerald-500 mt-0.5" />
+                          </span>
+                        )}
+                        {book.analysis_status === 'failed' && (
+                          <span title={t('analysis.status.failed') as string}>
+                            <AlertTriangle className="shrink-0 w-3.5 h-3.5 text-red-400 mt-0.5" />
+                          </span>
+                        )}
+                        {book.analysis_status === 'queued' && (
+                          <span className="shrink-0 text-xs px-1 py-0 bg-slate-100 text-slate-400 rounded mt-0.5" title={t('analysis.status.queued') as string}>Q</span>
+                        )}
                         <span className="shrink-0 text-xs font-mono px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">
                           {book.file_format}
                         </span>
+                        <button
+                          onClick={e => { e.stopPropagation(); setDetailBook(book) }}
+                          className="shrink-0 p-0.5 text-slate-300 hover:text-amber-500 transition-colors"
+                          title={t('book.editInfo') as string}>
+                          <Info className="w-3.5 h-3.5" />
+                        </button>
                         {book.summary && (
                           <ChevronDown className={cn(
                             'shrink-0 w-4 h-4 text-slate-300 transition-transform duration-200',
@@ -258,6 +289,27 @@ export function NotesPage() {
           )}
         </div>
       </div>
+
+      {expandingGenre && (
+        <GenreExpandModal
+          genrePath={expandingGenre}
+          onClose={() => setExpandingGenre(null)}
+          onApplied={() => {
+            api.get<GenreEntry[]>('/books/genres').then(setGenreData).catch(() => {})
+            setRefreshKey(k => k + 1)
+          }}
+        />
+      )}
+
+      {detailBook && (
+        <BookDetailModal
+          book={detailBook}
+          defaultOpenMode={defaultOpenMode}
+          onClose={() => setDetailBook(null)}
+          onRemoved={id => { removeBook(id); setDetailBook(null) }}
+          onUpdated={updated => { updateBook(updated as Book); setDetailBook(null) }}
+        />
+      )}
     </div>
   )
 }

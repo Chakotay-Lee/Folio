@@ -20,3 +20,4 @@ class Book(SQLModel, table=True):
     simhash: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    analysis_status: str = Field(default="none")  # none | queued | analyzing | done | failed

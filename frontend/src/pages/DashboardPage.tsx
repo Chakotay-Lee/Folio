@@ -20,6 +20,7 @@ type Book = {
   genre_path: string | null; tags_json: string | null
   file_format: string; created_at: string
   summary: string | null
+  analysis_status?: string
 }
 type Stats = {
   total_books: number; total_bytes: number; genre_count: number; tag_count: number

@@ -1,4 +1,4 @@
-# Folio — スマート個人ライブラリ
+# Folio — スマート個人ライブラリ `v0.2.0`
 
 **言語：** [English](README.md) | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | 日本語
 
@@ -29,7 +29,28 @@
 - **本のアップロード** — ブラウザからドラッグ＆ドロップまたはファイル選択でアップロード
 - **多言語 UI** — English・繁體中文・简体中文・日本語 に切り替え可能
 - **AI 出力言語** — 概要・タグ・ジャンルをサポート言語で生成可能
-- **OCR サポート** — PaddleOCR をオプションで有効化し、スキャン PDF に対応
+- **OCR サポート** — VLM ベースの OCR をオプションで有効化し、スキャン PDF や画像のみの PDF のページ画像から `analysis_model`（または `extraction_model`）でテキストを抽出
+- **深度解析** — 書籍ごとに手動で AI 分析パイプラインを起動：章節検出・全文抽出・図形抽出（ネイティブ PDF は PyMuPDF、スキャン PDF は VLM バウンディングボックス）・図形説明生成・章節要約・自己完結型 HTML エクスポート。`config.json` に `llms.analysis_model` を設定（未設定時は `extraction_model` を使用）。
+- **ブック チャット** — 解析済み書籍に対する RAG ベースの Q&A。章の**要約**をベースラインコンテキストとして送信し、詳細が必要な場合のみ **tool calling** で章の全文を取得。大きな書籍でもトークン使用量を抑えられます。図はIDで参照され、会話内にインライン表示されます。会話履歴はローカルに永続保存されます。
+- **テキスト読み上げ** — 章の要約または完全な章テキストから音声を生成。**OpenAI TTS API**（モデル：`tts-1`/`tts-1-hd`；音声：alloy、echo、fable、onyx、nova、shimmer）と**ローカルバイナリ**エンジン（Piper、Kokoro、または stdin→stdout MP3 に対応した任意のバイナリ）をサポート。設定ページで構成できます。書籍詳細パネルの「分析結果・TTS」から開けます。
+
+---
+
+## 深度解析と Book Chat
+
+Folio は書籍のインデックスツールにとどまらず、**書籍を読み込んで内容についてAIと対話する**こともできます。
+
+書籍の深度解析を実行すると、Folio は完全な AI 分析パイプラインを走らせます：
+
+1. **章検出** — PDF 全体の章境界を特定
+2. **全文抽出** — 章ごとに全文を抽出（スキャンページは VLM OCR を使用）
+3. **図表抽出** — 埋め込み画像を検出・クロップし、各図に説明文を生成
+4. **章要約** — 設定した LLM で各章の ≤300 字要約を生成
+5. **HTML エクスポート** — 要約・図表・メタデータを自己完結型 HTML にまとめる
+
+解析完了後、**Book Chat** を開くと AI と書籍の内容について会話できます。AI は章の要約をベースラインコンテキストとして受け取り、詳細が必要な場合のみ tool calling で章の全文を取得するため、トークン使用量を抑えながら詳細な質問にも答えられます。抽出された図表は会話内にインライン表示されます。
+
+> **深度解析の推奨モデル：** 図表抽出やスキャン PDF の OCR には**マルチモーダル（ビジョン対応）**モデルが必要です。現在のテストでは、**Qwen2-VL / Qwen3**（例：Ollama で `qwen2-vl:7b`）が図表検出・テキスト認識の両面で最も高い精度を示しています。
 
 ---
 
@@ -45,7 +66,7 @@ Library/
 │   │   ├── extractor.py   # テキスト抽出（PDF/EPUB/TXT/MD）
 │   │   ├── cover.py       # カバー画像抽出
 │   │   ├── dedup.py       # SimHash 近似重複チェック
-│   │   └── ocr.py         # オプション PaddleOCR
+│   │   └── ocr.py         # オプション VLM OCR
 │   ├── llm/
 │   │   ├── prompts.py     # 多言語抽出プロンプトビルダー
 │   │   ├── openai_provider.py
@@ -128,12 +149,6 @@ cd backend
 uv sync
 ```
 
-OCR サポートを有効にする場合（任意）：
-
-```bash
-uv sync --extra ocr
-```
-
 ### 3. フロントエンド依存パッケージのインストール
 
 ```bash
@@ -176,9 +191,16 @@ npm run dev
 | `llms.extraction_model` | メタデータ抽出に使用する LLM | — |
 | `llms.embedding_model` | セマンティック埋め込みに使用するモデル | — |
 | `llms.chat_model` | チャット機能に使用するモデル | — |
+| `llms.analysis_model` | 深度解析に使用する VLM（図抽出・OCR・図説明）。未設定時は `extraction_model` を使用 | — |
+| `tts.provider` | TTS エンジン：`openai` または `local` | `"openai"` |
+| `tts.model` | OpenAI TTS モデル（`tts-1` または `tts-1-hd`） | `"tts-1"` |
+| `tts.voice` | OpenAI 音声（`alloy`・`echo`・`fable`・`onyx`・`nova`・`shimmer`） | `"alloy"` |
+| `tts.api_key` | TTS 用 OpenAI API キー | `""` |
+| `tts.binary_path` | ローカル TTS バイナリのパス（`provider: local` の場合） | `""` |
+| `tts.chunk_size` | TTS リクエストあたりの最大文字数 | `4000` |
 | `search_settings.top_k` | セマンティック検索の返却件数 | `10` |
 | `search_settings.max_pages_to_analyze` | テキスト抽出時に読み取る最大ページ数 | `20` |
-| `ocr.enabled` | 画像 PDF 向け PaddleOCR を有効化 | `true` |
+| `ocr.enabled` | 画像 PDF 向け VLM OCR を有効化 | `true` |
 | `ocr.min_chars_threshold` | この文字数未満の場合に OCR を実行 | `50` |
 | `default_open_mode` | 書籍を開く方法：`system`・`browser`・`download` | `"system"` |
 | `content_language` | AI 生成コンテンツの言語：`en`・`zh-TW`・`zh-CN`・`ja` | `"en"` |
@@ -201,7 +223,7 @@ LLM プロバイダーフィールド（`extraction_model`・`embedding_model`�
 
 | 形式 | テキスト抽出 | カバー抽出 |
 |---|---|---|
-| PDF | PyMuPDF（+ オプション OCR） | 1 ページ目レンダリング |
+| PDF | PyMuPDF（+ オプション VLM OCR） | 1 ページ目レンダリング |
 | EPUB | ebooklib | マニフェストからカバー画像 |
 | TXT | 直接読み取り | — |
 | Markdown | 直接読み取り | — |
@@ -247,6 +269,7 @@ LLM プロバイダーフィールド（`extraction_model`・`embedding_model`�
 | `user_activity.db` | SQLite — ユーザーアクティビティ |
 | `vector_store/` | ChromaDB — 埋め込みインデックス |
 | `assets/` | 抽出したカバー画像 |
+| `analysis/{book-uuid}/` | 書籍ごとの深度解析データ：章テキスト・要約・抽出図・音声キャッシュ・HTML エクスポート |
 
 データディレクトリを変更するには、`config.json` の `storage_paths.*` に絶対パスを設定してください。
 
@@ -255,6 +278,16 @@ LLM プロバイダーフィールド（`extraction_model`・`embedding_model`�
 ## インデックスの再構築
 
 埋め込みモデルを変更すると、既存のベクトルインデックスが新しいモデルと互換性を失います。**Settings → Re-index**（または `POST /api/reindex`）で再構築してください。SQLite の書籍レコードはそのまま保持され、ChromaDB インデックスのみ次回スキャン時に再構築されます。
+
+---
+
+## 既知の問題
+
+| 問題 | 詳細 |
+|---|---|
+| スキャン PDF の図表抽出精度 | スキャンページの図表境界検出は VLM のバウンディングボックス推論に依存しており、領域の誤認識や図表の見落としが発生することがあります。テキストレイヤーを持つネイティブ PDF の方が精度は高くなります。 |
+| 図表抽出の推奨モデル | 現在のテストでは **Qwen2-VL / Qwen3** が他のモデル（LLaVA、Gemma など）と比べて最も高い図表検出精度を示しています。 |
+| 大きな書籍のトークン使用量 | 深度解析はすべてのページを順番に処理するため、非常に大きな書籍（500ページ以上）ではモデルとプロバイダーによっては処理時間とトークン消費が大きくなることがあります。 |
 
 ---
 

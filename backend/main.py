@@ -43,6 +43,9 @@ async def lifespan(app: FastAPI):
     from backend.ingestion.ocr import init_ocr
     init_ocr(cfg)
 
+    from backend.analysis.pipeline import recover_stale_jobs
+    recover_stale_jobs(cfg)
+
     watcher.start_watcher(cfg.storage.watch_folders, cfg)
 
     yield
@@ -218,6 +221,160 @@ def book_genres():
     return [{"genre_path": r[0], "count": r[1]} for r in rows]
 
 
+@books_router.get("/genres/hints")
+def get_genre_hints(request: Request):
+    from backend.genre_hints import load_hints
+    cfg: AppConfig = request.app.state.config
+    return load_hints(cfg.base_dir)
+
+
+@books_router.put("/genres/hints")
+async def put_genre_hints(request: Request):
+    from backend.genre_hints import patch_hints
+    cfg: AppConfig = request.app.state.config
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Body must be a JSON object {genre_path: description}")
+    return patch_hints(cfg.base_dir, body)
+
+
+@books_router.post("/genres/expand/names")
+async def expand_genre_names(request: Request):
+    """Phase 1: fetch books under genre and ask LLM to suggest sub-genre names."""
+    from backend.db.core import get_core_session
+    from backend.models.book import Book
+    from backend.llm.factory import get_provider
+    from backend.llm.prompts import build_genre_names_prompt
+    from backend.genre_hints import load_hints
+    from sqlmodel import select, or_
+    import json as _json
+    import asyncio
+
+    body = await request.json()
+    genre_prefix = body.get("genre_prefix", "").strip()
+    if not genre_prefix:
+        raise HTTPException(status_code=422, detail="genre_prefix is required")
+
+    cfg: AppConfig = request.app.state.config
+
+    with get_core_session() as session:
+        rows = session.exec(
+            select(Book).where(
+                or_(Book.genre_path == genre_prefix,
+                    Book.genre_path.like(genre_prefix + " > %"))
+            )
+        ).all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No books found under this genre")
+
+    books_data = []
+    for b in rows:
+        try:
+            tags = _json.loads(b.tags_json) if b.tags_json else []
+        except Exception:
+            tags = []
+        books_data.append({"id": b.id, "title": b.title, "tags": tags})
+
+    provider = get_provider(cfg.llms.extraction_model)
+    names_prompt = build_genre_names_prompt(genre_prefix, books_data, language=cfg.content_language)
+
+    loop = asyncio.get_event_loop()
+    names_raw = await loop.run_in_executor(None, lambda: provider.complete(names_prompt, max_tokens=1024))
+
+    raw = (names_raw or "").strip()
+    start = raw.find("{"); end = raw.rfind("}") + 1
+    if start == -1 or end <= start:
+        raise HTTPException(status_code=500, detail=f"LLM returned no valid JSON: {raw[:150]!r}")
+
+    sub_genres = _json.loads(raw[start:end]).get("sub_genres", [])
+    if not sub_genres:
+        raise HTTPException(status_code=500, detail="LLM returned no sub-genres")
+
+    hints = load_hints(cfg.base_dir)
+    for sg in sub_genres:
+        if not sg.get("description"):
+            sg["description"] = hints.get(sg["path"], "")
+
+    return {
+        "genre_prefix": genre_prefix,
+        "sub_genres": sub_genres,
+        "books": books_data,
+        "total_books": len(rows),
+    }
+
+
+@books_router.post("/genres/expand/assign")
+async def expand_genre_assign(request: Request):
+    """Phase 2: assign one batch of books to the suggested sub-genres."""
+    from backend.llm.factory import get_provider
+    from backend.llm.prompts import build_genre_assign_prompt
+    import json as _json
+    import asyncio
+
+    body = await request.json()
+    genre_prefix = body.get("genre_prefix", "").strip()
+    sub_genres = body.get("sub_genres", [])
+    books = body.get("books", [])
+
+    if not genre_prefix or not sub_genres or not books:
+        raise HTTPException(status_code=422, detail="genre_prefix, sub_genres and books are required")
+
+    cfg: AppConfig = request.app.state.config
+    provider = get_provider(cfg.llms.extraction_model)
+    assign_prompt = build_genre_assign_prompt(genre_prefix, sub_genres, books, language=cfg.content_language)
+
+    loop = asyncio.get_event_loop()
+    assign_raw = await loop.run_in_executor(None, lambda: provider.complete(assign_prompt, max_tokens=2048))
+
+    raw = (assign_raw or "").strip()
+    start = raw.find("{"); end = raw.rfind("}") + 1
+    if start == -1 or end <= start:
+        raise HTTPException(status_code=500, detail=f"LLM returned no valid JSON: {raw[:200]!r}")
+
+    try:
+        assignments = _json.loads(raw[start:end]).get("assignments", [])
+    except _json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"JSON parse error ({exc}): {raw[:200]!r}")
+
+    return {"assignments": assignments}
+
+
+@books_router.post("/genres/expand/apply")
+async def apply_genre_expansion(request: Request):
+    """Batch-update genre_paths and save sub-genre hints."""
+    from backend.db.core import get_core_session
+    from backend.models.book import Book
+    from backend.genre_hints import patch_hints
+    from sqlmodel import select
+
+    body = await request.json()
+    sub_genres = body.get("sub_genres", [])
+    cfg: AppConfig = request.app.state.config
+
+    hints_updates: dict[str, str] = {}
+    updated = 0
+
+    with get_core_session() as session:
+        for sg in sub_genres:
+            path = sg.get("path", "")
+            description = sg.get("description", "")
+            if description and path:
+                hints_updates[path] = description
+            for bid in sg.get("book_ids", []):
+                book = session.exec(select(Book).where(Book.id == bid)).first()
+                if book:
+                    book.genre_path = path
+                    session.add(book)
+                    updated += 1
+        session.commit()
+
+    if hints_updates:
+        patch_hints(cfg.base_dir, hints_updates)
+
+    return {"updated": updated}
+
+
 @books_router.post("/upload")
 async def upload_book(file: UploadFile, request: Request):
     from backend.ingestion.extractor import SUPPORTED_FORMATS
@@ -318,7 +475,15 @@ def open_book_in_system(uuid: str, request: Request):
 def get_config(request: Request):
     import json
     path = request.app.state.config_path
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    # Inject runtime capability flags
+    try:
+        import ebooklib  # noqa: F401
+        epub_available = True
+    except ImportError:
+        epub_available = False
+    data["capabilities"] = {"epub_export": epub_available}
+    return data
 
 
 @config_router.put("")
@@ -608,6 +773,60 @@ def _reclassify_book_sync(uuid: str, cfg, vs) -> dict | None:
     return result
 
 
+@books_router.post("/{uuid}/suggest-genre")
+async def suggest_genre(uuid: str, request: Request):
+    """Ask the LLM to pick the best genre from existing ones, or suggest a new one."""
+    from backend.db.core import get_core_session
+    from backend.models.book import Book
+    from backend.llm.factory import get_provider
+    from backend.llm.prompts import build_genre_suggest_prompt
+    from sqlmodel import select
+
+    cfg: AppConfig = request.app.state.config
+
+    with get_core_session() as session:
+        book = session.exec(select(Book).where(Book.id == uuid)).first()
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
+        existing_genres = sorted({
+            g for g in session.exec(select(Book.genre_path).where(Book.genre_path.isnot(None))).all()
+            if g
+        })
+
+    provider = get_provider(cfg.llms.extraction_model)
+    prompt = build_genre_suggest_prompt(
+        title=book.title,
+        summary=book.summary or "",
+        existing_genres=existing_genres,
+        language=cfg.content_language,
+    )
+
+    import json as _json
+    from backend.genre_hints import patch_hints
+    try:
+        raw = provider.complete(prompt, max_tokens=512).strip()
+        # Expect JSON: {"genre_path": "...", "is_new": true/false, "description": "..."}
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start != -1:
+            raw = raw[start:end]
+        try:
+            data = _json.loads(raw)
+            suggested = data.get("genre_path", raw)
+            is_new = data.get("is_new", suggested not in existing_genres)
+            description = data.get("description", "")
+        except _json.JSONDecodeError:
+            suggested = raw.strip().strip('"')
+            is_new = suggested not in existing_genres
+            description = ""
+        # Auto-save description for new genres
+        if is_new and suggested and description:
+            patch_hints(cfg.base_dir, {suggested: description})
+        return {"suggested_genre": suggested, "is_new": is_new, "description": description}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM suggest failed: {e}")
+
+
 @books_router.post("/{uuid}/reclassify")
 async def reclassify_book(uuid: str, request: Request):
     """Re-run LLM metadata extraction on an existing book using the current prompt."""
@@ -723,9 +942,16 @@ async def scan_custom_path(request: Request):
     return {"status": "started", "pending_files": pending, "path": str(folder)}
 
 
+from backend.routers.analysis import router as analysis_router
+from backend.routers.chat import router as chat_router
+from backend.routers.tts import router as tts_router
+
 app.include_router(health_router)
 app.include_router(search_router)
 app.include_router(books_router)
+app.include_router(analysis_router)
+app.include_router(chat_router)
+app.include_router(tts_router)
 app.include_router(config_router)
 app.include_router(user_data_router)
 app.include_router(reindex_router)

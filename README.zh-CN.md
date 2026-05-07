@@ -1,4 +1,4 @@
-# Folio — 智能个人书库
+# Folio — 智能个人书库 `v0.2.0`
 
 **语言：** [English](README.md) | [繁體中文](README.zh-TW.md) | 简体中文 | [日本語](README.ja.md)
 
@@ -29,7 +29,28 @@
 - **书籍上传** — 直接从浏览器拖拽或选取文件上传
 - **多语言界面** — 支持 English、繁體中文、简体中文、日本語
 - **AI 输出语言** — 摘要、标签、分类可用任意支持的语言生成
-- **OCR 支持** — 可选配 PaddleOCR，处理纯图片扫描 PDF
+- **OCR 支持** — 可选配 VLM 识别，将扫描版/纯图片 PDF 的页面图片送交 `analysis_model`（或 `extraction_model`）提取文字
+- **深度解析** — 手动触发逐本 AI 分析流程：章节检测、全文提取、图形提取（原生 PDF 使用 PyMuPDF；扫描 PDF 使用 VLM 边界框）、图形描述、章节摘要、自含式 HTML 导出。在 `config.json` 中设置 `llms.analysis_model`（默认沿用 `extraction_model`）。
+- **书籍对话** — 对已解析书籍进行 RAG 问答。以章节**摘要**作为基准上下文传送给 LLM；完整章节内文通过 **tool calling** 按需获取，即使书籍篇幅庞大也能维持低 token 用量。图形以 ID 引用并在对话中内嵌显示。对话记录本地持久化存储。
+- **文字转语音** — 从章节摘要或完整章节内文生成音频。支持 **OpenAI TTS API**（模型：`tts-1`/`tts-1-hd`；语音：alloy、echo、fable、onyx、nova、shimmer）与**本地可执行文件**引擎（Piper、Kokoro 或任何支持 stdin→stdout MP3 的可执行文件）。可在设置页面配置。从书籍详细面板点选「分析结果与 TTS」进入。
+
+---
+
+## 深度解析与 Book Chat
+
+Folio 不只是书籍索引工具，它还能**阅读书籍，并和你一起讨论内容**。
+
+对一本书触发深度解析后，Folio 会执行完整的 AI 分析流程：
+
+1. **章节检测** — 识别整份 PDF 的章节边界
+2. **全文提取** — 逐章提取全文（扫描页面使用 VLM OCR）
+3. **图表提取** — 定位并裁切内嵌图片，并为每张图生成文字描述
+4. **章节摘要** — 使用配置的 LLM 为每章生成 ≤300 字摘要
+5. **HTML 导出** — 将摘要、图表与元数据打包成独立 HTML 文件
+
+分析完成后，打开 **Book Chat** 即可让 AI 陪你讨论这本书的内容。AI 以章节摘要作为基准上下文，并在需要时通过 tool calling 按需获取完整章节内文，在维持低 token 用量的同时，仍能回答具体细节问题。提取的图表会在对话中内嵌显示。
+
+> **深度解析推荐模型：** 图表提取与扫描 PDF OCR 需要**多模态（支持视觉输入）**的模型。目前测试中，**Qwen2-VL / Qwen3**（例如通过 Ollama 使用 `qwen2-vl:7b`）在图表检测与文字识别准确度上表现最佳。
 
 ---
 
@@ -45,7 +66,7 @@ Library/
 │   │   ├── extractor.py   # 文字提取（PDF/EPUB/TXT/MD）
 │   │   ├── cover.py       # 封面图片提取
 │   │   ├── dedup.py       # SimHash 近似重复检查
-│   │   └── ocr.py         # 可选 PaddleOCR
+│   │   └── ocr.py         # 可选 VLM OCR
 │   ├── llm/
 │   │   ├── prompts.py     # 多语言提取 prompt 生成器
 │   │   ├── openai_provider.py
@@ -128,12 +149,6 @@ cd backend
 uv sync
 ```
 
-可选 OCR 支持：
-
-```bash
-uv sync --extra ocr
-```
-
 ### 3. 安装前端依赖
 
 ```bash
@@ -176,9 +191,16 @@ npm run dev
 | `llms.extraction_model` | 用于元数据提取的 LLM | — |
 | `llms.embedding_model` | 用于语义嵌入的模型 | — |
 | `llms.chat_model` | 用于对话功能的模型 | — |
+| `llms.analysis_model` | 深度解析使用的 VLM（图形提取、OCR、图形描述）。未设置时沿用 `extraction_model` | — |
+| `tts.provider` | TTS 引擎：`openai` 或 `local` | `"openai"` |
+| `tts.model` | OpenAI TTS 模型（`tts-1` 或 `tts-1-hd`） | `"tts-1"` |
+| `tts.voice` | OpenAI 语音（`alloy`、`echo`、`fable`、`onyx`、`nova`、`shimmer`） | `"alloy"` |
+| `tts.api_key` | TTS 使用的 OpenAI API 密钥 | `""` |
+| `tts.binary_path` | 本地 TTS 可执行文件路径（`provider: local` 时使用） | `""` |
+| `tts.chunk_size` | 每次 TTS 请求的最大字符数 | `4000` |
 | `search_settings.top_k` | 语义搜索返回结果数 | `10` |
 | `search_settings.max_pages_to_analyze` | 文字提取时读取的最大页数 | `20` |
-| `ocr.enabled` | 启用 PaddleOCR 处理图片 PDF | `true` |
+| `ocr.enabled` | 启用 VLM OCR 处理图片 PDF | `true` |
 | `ocr.min_chars_threshold` | 低于此字符数才触发 OCR | `50` |
 | `default_open_mode` | 打开书籍方式：`system`、`browser`、`download` | `"system"` |
 | `content_language` | AI 生成内容的语言：`en`、`zh-TW`、`zh-CN`、`ja` | `"en"` |
@@ -201,7 +223,7 @@ LLM 提供商字段（适用于 `extraction_model`、`embedding_model`、`chat_m
 
 | 格式 | 文字提取 | 封面提取 |
 |---|---|---|
-| PDF | PyMuPDF（+ 可选 OCR） | 第一页渲染 |
+| PDF | PyMuPDF（+ 可选 VLM OCR） | 第一页渲染 |
 | EPUB | ebooklib | 从 manifest 提取封面图片 |
 | TXT | 直接读取 | — |
 | Markdown | 直接读取 | — |
@@ -247,6 +269,7 @@ LLM 提供商字段（适用于 `extraction_model`、`embedding_model`、`chat_m
 | `user_activity.db` | SQLite — 用户活动 |
 | `vector_store/` | ChromaDB — 嵌入索引 |
 | `assets/` | 提取的封面图片 |
+| `analysis/{book-uuid}/` | 每本书的深度解析数据：章节文字、摘要、提取图形、音频缓存、HTML 导出 |
 
 若要更改数据目录，请在 `config.json` 的 `storage_paths.*` 中设置绝对路径。
 
@@ -255,6 +278,16 @@ LLM 提供商字段（适用于 `extraction_model`、`embedding_model`、`chat_m
 ## 重建索引
 
 更换嵌入模型后，现有向量索引将与新模型不兼容。请至 **Settings → Re-index**（或 `POST /api/reindex`）重建。SQLite 的书籍记录会保留；仅 ChromaDB 索引在下次扫描时重建。
+
+---
+
+## 已知问题
+
+| 问题 | 说明 |
+|---|---|
+| 扫描 PDF 图表提取准确度 | 扫描页面的图表边界检测依赖 VLM 边界框推断，可能发生区域误判或图表遗漏。原生 PDF（含文字层）的准确度较高。 |
+| 图表提取推荐模型 | 目前测试中，**Qwen2-VL / Qwen3** 在图表检测准确度上优于其他模型（如 LLaVA、Gemma）。 |
+| 大型书籍 token 用量 | 深度解析会依序处理每一页，书籍页数较多（500页以上）时，依模型与供应商不同，所需时间与 token 消耗可能相当可观。 |
 
 ---
 

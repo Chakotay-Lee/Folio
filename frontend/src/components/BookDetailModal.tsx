@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Monitor, Globe, Download, Edit3, Trash2, FileText } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { X, Monitor, Globe, Download, Edit3, Trash2, FileText, Sparkles, Loader2, MessageSquare, Volume2 } from 'lucide-react'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { bookCoverColor, parseTags, tagColor, formatBytes } from '@/lib/bookUtils'
 import { openBook } from './BookContextMenu'
@@ -20,6 +22,7 @@ export type DetailBook = {
   file_format?: string
   file_size_bytes?: number
   created_at?: string
+  analysis_status?: string
 }
 
 interface Props {
@@ -32,9 +35,37 @@ interface Props {
 
 export function BookDetailModal({ book, defaultOpenMode = 'system', onClose, onRemoved, onUpdated }: Props) {
   const { t } = useLang()
+  const navigate = useNavigate()
   const [imgFailed, setImgFailed] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showRemove, setShowRemove] = useState(false)
+  const [analysisStatus] = useState(book.analysis_status ?? 'none')
+  const [triggeringAnalysis, setTriggeringAnalysis] = useState(false)
+
+  const handleTriggerAnalysis = async () => {
+    setTriggeringAnalysis(true)
+    try {
+      await api.post(`/books/${book.id}/analysis/trigger`, {})
+      onClose()
+      navigate(`/books/${book.id}/analysis`)
+    } catch {
+      setTriggeringAnalysis(false)
+    }
+  }
+
+  const handleOpenChat = () => {
+    onClose()
+    navigate(`/books/${book.id}/chat`)
+  }
+
+  const handleViewAnalysis = () => {
+    onClose()
+    navigate(`/books/${book.id}/analysis`)
+  }
+
+  const handleExportHtml = () => {
+    window.open(`/api/books/${book.id}/analysis/export`, '_blank')
+  }
 
   const tags = parseTags(book.tags_json)
   const genreParts = book.genre_path?.split(' > ') ?? []
@@ -172,6 +203,56 @@ export function BookDetailModal({ book, defaultOpenMode = 'system', onClose, onR
               className="p-2 rounded-xl border border-red-100 text-red-400 hover:bg-red-50 text-sm transition-colors">
               <Trash2 className="w-4 h-4" />
             </button>
+          </div>
+
+          {/* Analysis row */}
+          <div className="px-6 pb-4 flex items-center gap-2 flex-wrap">
+            {analysisStatus === 'none' || analysisStatus === 'failed' ? (
+              <button
+                onClick={handleTriggerAnalysis}
+                disabled={triggeringAnalysis}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 text-xs font-medium rounded-xl transition-colors disabled:opacity-50">
+                {triggeringAnalysis
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Sparkles className="w-3.5 h-3.5" />}
+                {t(analysisStatus === 'failed' ? 'analysis.reanalyze' : 'analysis.deepAnalysis') as string}
+              </button>
+            ) : analysisStatus === 'done' ? (
+              <button
+                onClick={handleTriggerAnalysis}
+                disabled={triggeringAnalysis}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:bg-slate-50 border border-slate-200 text-xs rounded-xl transition-colors disabled:opacity-50">
+                <Sparkles className="w-3.5 h-3.5" />
+                {t('analysis.reanalyze') as string}
+              </button>
+            ) : (
+              <span className="flex items-center gap-1.5 px-3 py-1.5 text-amber-600 text-xs">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                {t(`analysis.status.${analysisStatus}` as Parameters<typeof t>[0]) as string}
+              </span>
+            )}
+
+            {analysisStatus === 'done' && (
+              <>
+                <button
+                  onClick={handleViewAnalysis}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-50 border border-slate-200 text-xs rounded-xl transition-colors">
+                  <Volume2 className="w-3.5 h-3.5" />
+                  {t('analysis.viewResults') as string}
+                </button>
+                <button
+                  onClick={handleExportHtml}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-50 border border-slate-200 text-xs rounded-xl transition-colors">
+                  {t('analysis.exportHtml') as string}
+                </button>
+                <button
+                  onClick={handleOpenChat}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-50 border border-slate-200 text-xs rounded-xl transition-colors">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  {t('chat.title') as string}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
