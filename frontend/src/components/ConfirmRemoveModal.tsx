@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Trash2, X } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useLang } from '@/lib/LangContext'
@@ -25,8 +26,8 @@ export function ConfirmRemoveModal({ bookId, bookTitle, onConfirm, onCancel }: P
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
         <div className="flex items-start justify-between mb-4">
           <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
@@ -63,6 +64,7 @@ export function ConfirmRemoveModal({ bookId, bookTitle, onConfirm, onCancel }: P
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

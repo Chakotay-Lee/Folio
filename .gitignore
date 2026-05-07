@@ -5,6 +5,7 @@ config.json
 *.db
 vector_store/
 assets/
+analysis/
 
 # Python
 __pycache__/

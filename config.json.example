@@ -32,6 +32,14 @@
       "max_tokens": 2048,
       "timeout_seconds": 120,
       "api_key": "YOUR_ANTHROPIC_API_KEY"
+    },
+    "analysis_model": {
+      "provider": "ollama",
+      "model_name": "qwen2-vl",
+      "temperature": 0.1,
+      "max_tokens": 2048,
+      "timeout_seconds": 120,
+      "base_url": "http://localhost:11434"
     }
   },
 
@@ -44,5 +52,13 @@
     "enabled": true,
     "provider": "paddleocr",
     "min_chars_threshold": 50
+  },
+
+  "tts": {
+    "provider": "openai",
+    "model": "tts-1",
+    "voice": "alloy",
+    "api_key": "YOUR_OPENAI_API_KEY",
+    "chunk_size": 4000
   }
 }

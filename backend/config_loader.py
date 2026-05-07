@@ -33,6 +33,7 @@ class LLMConfig:
     embedding_model: LLMModelConfig
     chat_model: LLMModelConfig
     ocr_model: LLMModelConfig | None = None
+    analysis_model: LLMModelConfig | None = None  # VLM for figure detection; falls back to extraction_model
 
 
 @dataclass
@@ -42,9 +43,18 @@ class SearchSettings:
 
 
 @dataclass
+class TTSConfig:
+    provider: str = "openai"          # "openai" | "local"
+    model: str = "tts-1"
+    voice: str = "alloy"
+    api_key: str = ""
+    binary_path: str = ""             # path to local TTS binary (Kokoro/Piper)
+    chunk_size: int = 4000            # max chars per TTS request
+
+
+@dataclass
 class OCRConfig:
     enabled: bool = True
-    provider: str = "paddleocr"
     min_chars_threshold: int = 50
 
 
@@ -55,6 +65,8 @@ class AppConfig:
     llms: LLMConfig
     search: SearchSettings
     ocr: OCRConfig
+    tts: TTSConfig = field(default_factory=TTSConfig)
+    analysis_dir: Path = field(default=None)  # type: ignore[assignment]
     default_open_mode: str = "system"  # "system" | "browser" | "download"
     content_language: str = "en"  # "en" | "zh-TW" | "zh-CN" | "ja"
 
@@ -144,6 +156,7 @@ def load_config(config_path: str | Path = "./config.json") -> AppConfig:
         embedding_model=_parse_llm_model(llm_raw["embedding_model"]),
         chat_model=_parse_llm_model(llm_raw["chat_model"]),
         ocr_model=_parse_llm_model(llm_raw["ocr_model"]) if "ocr_model" in llm_raw else None,
+        analysis_model=_parse_llm_model(llm_raw["analysis_model"]) if "analysis_model" in llm_raw else None,
     )
 
     ss = raw["search_settings"]
@@ -155,12 +168,25 @@ def load_config(config_path: str | Path = "./config.json") -> AppConfig:
     ocr_raw = raw.get("ocr", {})
     ocr = OCRConfig(
         enabled=ocr_raw.get("enabled", True),
-        provider=ocr_raw.get("provider", "paddleocr"),
         min_chars_threshold=ocr_raw.get("min_chars_threshold", 50),
     )
+
+    tts_raw = raw.get("tts", {})
+    tts = TTSConfig(
+        provider=tts_raw.get("provider", "openai"),
+        model=tts_raw.get("model", "tts-1"),
+        voice=tts_raw.get("voice", "alloy"),
+        api_key=tts_raw.get("api_key", ""),
+        binary_path=tts_raw.get("binary_path", ""),
+        chunk_size=tts_raw.get("chunk_size", 4000),
+    )
+
+    analysis_dir_raw = raw.get("analysis_dir")
+    analysis_dir = resolve(analysis_dir_raw) if analysis_dir_raw else books_root / ".folio" / "analysis"
 
     default_open_mode = raw.get("default_open_mode", "system")
     content_language = raw.get("content_language", "en")
 
     return AppConfig(base_dir=base_dir, storage=storage, llms=llms, search=search, ocr=ocr,
+                     tts=tts, analysis_dir=analysis_dir,
                      default_open_mode=default_open_mode, content_language=content_language)

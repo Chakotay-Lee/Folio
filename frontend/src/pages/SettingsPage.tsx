@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Save, CheckCircle, AlertCircle, Cpu, Search, Eye, Globe } from 'lucide-react'
+import { Save, CheckCircle, AlertCircle, Cpu, Search, Eye, Globe, Sparkles, Plus, X, Volume2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, ApiError } from '@/lib/api'
 import { useLang } from '@/lib/LangContext'
@@ -10,17 +10,30 @@ type ModelConfig = {
   temperature: number; max_tokens: number; timeout_seconds: number; dimension?: number
 }
 
+type TTSConfig = {
+  provider: string
+  model: string
+  voice: string
+  api_key: string
+  binary_path: string
+  chunk_size: number
+}
+
 type ConfigShape = {
   llms: {
     extraction_model: ModelConfig
     embedding_model: ModelConfig
     chat_model: ModelConfig
+    analysis_model?: ModelConfig
   }
+  tts: TTSConfig
   search_settings: { top_k: number; max_pages_to_analyze: number }
-  ocr: { enabled: boolean; provider: string; min_chars_threshold: number }
+  ocr: { enabled: boolean; min_chars_threshold: number }
 }
 
 const PROVIDERS = ['openai', 'ollama', 'anthropic']
+const TTS_PROVIDERS = ['openai', 'local']
+const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -102,7 +115,11 @@ export function SettingsPage() {
 
   useEffect(() => {
     api.get<ConfigShape>('/config')
-      .then(data => { setConfig(data); setStatus('idle') })
+      .then(data => {
+        if (!data.tts) data.tts = { provider: 'openai', model: 'tts-1', voice: 'alloy', api_key: '', binary_path: '', chunk_size: 4000 }
+        setConfig(data)
+        setStatus('idle')
+      })
       .catch(() => setStatus('error'))
   }, [])
 
@@ -172,6 +189,40 @@ export function SettingsPage() {
       <ModelSection title={t('settings.embeddingModel') as string} icon={Search} value={config.llms.embedding_model} onChange={patchModel('embedding_model')} />
       <ModelSection title={t('settings.chatModel') as string} icon={Eye} value={config.llms.chat_model} onChange={patchModel('chat_model')} />
 
+      {/* Analysis model (optional — falls back to extraction_model if absent) */}
+      {config.llms.analysis_model ? (
+        <div className="relative">
+          <ModelSection
+            title={t('settings.analysisModel') as string}
+            icon={Sparkles}
+            value={config.llms.analysis_model}
+            onChange={patchModel('analysis_model')}
+          />
+          <button
+            onClick={() => setConfig(c => c ? { ...c, llms: { ...c.llms, analysis_model: undefined } } : c)}
+            title={t('settings.analysisModelRemove') as string}
+            className="absolute top-4 right-4 p-1 text-slate-300 hover:text-red-400 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-slate-500">{t('settings.analysisModel') as string}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{t('settings.analysisModelFallback') as string}</p>
+          </div>
+          <button
+            onClick={() => setConfig(c => c ? {
+              ...c,
+              llms: { ...c.llms, analysis_model: { ...c.llms.extraction_model } }
+            } : c)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors">
+            <Plus className="w-3.5 h-3.5" />
+            {t('settings.analysisModelAdd') as string}
+          </button>
+        </div>
+      )}
+
       {/* Search */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
         <h3 className="text-sm font-semibold text-slate-800">{t('settings.searchSection') as string}</h3>
@@ -212,6 +263,63 @@ export function SettingsPage() {
             </Field>
           </div>
         )}
+      </div>
+
+      {/* TTS */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 bg-amber-400/15 rounded-lg flex items-center justify-center">
+            <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+          </div>
+          <h3 className="text-sm font-semibold text-slate-800">{t('settings.ttsSection') as string}</h3>
+        </div>
+
+        <Field label={t('settings.ttsProvider') as string}>
+          <select
+            value={config.tts?.provider ?? 'openai'}
+            onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, provider: e.target.value } } : c)}
+            className={inputCls()}>
+            {TTS_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </Field>
+
+        {(config.tts?.provider ?? 'openai') === 'openai' ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={t('settings.ttsModel') as string}>
+                <input type="text" value={config.tts?.model ?? 'tts-1'}
+                  onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, model: e.target.value } } : c)}
+                  className={inputCls()} />
+              </Field>
+              <Field label={t('settings.ttsVoice') as string}>
+                <select
+                  value={config.tts?.voice ?? 'alloy'}
+                  onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, voice: e.target.value } } : c)}
+                  className={inputCls()}>
+                  {OPENAI_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label={t('settings.apiKey') as string}>
+              <input type="password" value={config.tts?.api_key ?? ''}
+                onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, api_key: e.target.value } } : c)}
+                className={inputCls()} />
+            </Field>
+          </>
+        ) : (
+          <Field label={t('settings.ttsBinaryPath') as string}>
+            <input type="text" value={config.tts?.binary_path ?? ''}
+              placeholder="/usr/local/bin/piper"
+              onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, binary_path: e.target.value } } : c)}
+              className={inputCls()} />
+          </Field>
+        )}
+
+        <Field label={t('settings.ttsChunkSize') as string}>
+          <input type="number" value={config.tts?.chunk_size ?? 4000}
+            onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, chunk_size: Number(e.target.value) } } : c)}
+            className={cn(inputCls(), 'max-w-32')} />
+        </Field>
       </div>
 
       {/* Save */}

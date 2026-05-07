@@ -10,14 +10,27 @@ class OpenAIProvider(LLMProvider):
     def __init__(self, model_name: str, api_key: str, temperature: float, max_tokens: int,
                  timeout_seconds: int, base_url: str = "", extra_body: dict | None = None, **_):
         from openai import OpenAI
+        self.base_url = base_url.rstrip("/") if base_url else "https://api.openai.com/v1"
+        self.api_key = api_key
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout_seconds = timeout_seconds
+        self.extra_body = extra_body or {}
         kwargs: dict = {"api_key": api_key, "timeout": float(timeout_seconds)}
         if base_url:
             kwargs["base_url"] = base_url
         self.client = OpenAI(**kwargs)
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.extra_body = extra_body or {}
+
+    def complete(self, prompt: str, max_tokens: int | None = None) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.temperature,
+            max_tokens=max_tokens or self.max_tokens,
+            extra_body=self.extra_body or None,
+        )
+        return response.choices[0].message.content or ""
 
     def extract_metadata(self, text: str, existing_genres: list[str] | None = None,
                          filename_hint: str | None = None, language: str = "en") -> dict:
