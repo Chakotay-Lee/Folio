@@ -5,7 +5,7 @@ config.json
 *.db
 vector_store/
 assets/
-analysis/
+.folio/analysis/
 
 # Python
 __pycache__/
