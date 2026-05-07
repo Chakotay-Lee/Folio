@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Send, Loader2, Trash2, Plus, ArrowLeft, Check, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { api } from '@/lib/api'
 import { useLang } from '@/lib/LangContext'
 
@@ -39,7 +42,7 @@ function renderContent(content: string, bookId: string) {
           prose-strong:font-semibold prose-strong:text-slate-800
           prose-a:text-amber-600 prose-a:underline
           prose-hr:border-slate-200">
-        <ReactMarkdown>{part}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{part}</ReactMarkdown>
       </div>
     )
   })
