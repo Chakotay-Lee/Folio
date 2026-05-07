@@ -203,10 +203,23 @@ def _parse_bbox_response(
     if start == -1 or end == 0:
         return []
 
+    json_str = text[start:end]
     try:
-        items = json.loads(text[start:end])
+        items = json.loads(json_str)
     except json.JSONDecodeError:
-        return []
+        # Some models embed LaTeX (backslashes) in description strings which
+        # breaks strict JSON parsing.  Strip description/label fields and retry.
+        import re
+        json_str_stripped = re.sub(
+            r'"(description|label)"\s*:\s*"(?:[^"\\]|\\.)*"',
+            r'"\1": ""',
+            json_str,
+            flags=re.DOTALL,
+        )
+        try:
+            items = json.loads(json_str_stripped)
+        except json.JSONDecodeError:
+            return []
 
     # Collect raw float values and descriptions before converting to int
     raw: list[tuple[float, float, float, float, str]] = []
