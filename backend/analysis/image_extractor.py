@@ -207,17 +207,22 @@ def _parse_bbox_response(
     try:
         items = json.loads(json_str)
     except json.JSONDecodeError:
-        # Some models embed LaTeX (backslashes) in description strings which
-        # breaks strict JSON parsing.  Strip description/label fields and retry.
+        # Models often embed LaTeX notation (\frac, \mathcal, \{, \_ …) in
+        # description strings.  These produce invalid JSON escape sequences.
+        # Fix: escape any \ not already forming a valid JSON escape so the
+        # LaTeX content is preserved as a literal string.
+        # Valid JSON single-char escapes: " \ / b f n r t  (plus \uXXXX)
+        # \f (form feed) and \b (backspace) are technically valid but in
+        # practice indicate LaTeX in this context, so we escape those too.
         import re
-        json_str_stripped = re.sub(
-            r'"(description|label)"\s*:\s*"(?:[^"\\]|\\.)*"',
-            r'"\1": ""',
-            json_str,
-            flags=re.DOTALL,
-        )
+        # Only \" and \\ are intentional JSON escapes in description text.
+        # Everything else (LaTeX \frac, \nabla, \right, \{, \_ …) should be
+        # treated as a literal backslash followed by the next character.
+        # This means actual \n/\r/\t in descriptions become literal strings,
+        # which is fine — we don't need control chars in figure descriptions.
+        json_fixed = re.sub(r'\\(?!["\\])', r'\\\\', json_str)
         try:
-            items = json.loads(json_str_stripped)
+            items = json.loads(json_fixed)
         except json.JSONDecodeError:
             return []
 
