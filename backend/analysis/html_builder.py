@@ -1,53 +1,104 @@
 """Build self-contained view.html from analysis output."""
 from __future__ import annotations
 import html
+import json as _json
 import re
 from pathlib import Path
 
 from backend.analysis.chapter_detector import Chapter
 from backend.analysis.image_extractor import ImageRecord
 
-# Matches ```html\n<html><body>...</body></html>\n```
-_HTML_BLOCK_RE = re.compile(r'```html\s*\n(.*?)\n```', re.DOTALL)
+# Any ``` ... ``` code block (capturing lang tag and body separately)
+_CODE_BLOCK_RE = re.compile(r'```(\w*)\s*\n(.*?)\n```', re.DOTALL)
 _BODY_RE = re.compile(r'<body>(.*?)</body>', re.DOTALL | re.IGNORECASE)
 
 
-def _chapter_text_to_html(text: str) -> str:
-    """Convert chapter text (mix of plain text + ```html blocks) to HTML fragment.
+def _plain_lines_to_html(text: str) -> list[str]:
+    """Wrap non-empty lines in <p> with HTML-escaped content."""
+    parts = []
+    for para in re.split(r'\n{2,}', text):
+        para = para.strip()
+        if not para:
+            continue
+        lines = [l.strip() for l in para.splitlines() if l.strip()]
+        if lines:
+            parts.append(f"<p>{html.escape(' '.join(lines))}</p>")
+    return parts
 
-    VLMs tend to emit structured pages as ```html ... ``` code blocks.  Extract
-    the <body> content from those blocks and insert it directly.  Remaining
-    plain-text is wrapped in <p> tags.  LaTeX ($...$, $$...$$) is preserved as-is
-    for MathJax to render on the client side.
+
+def _json_block_to_html(json_text: str) -> list[str]:
+    """Extract text_content (or text/content) fields from a JSON OCR block."""
+    try:
+        data = _json.loads(json_text)
+    except _json.JSONDecodeError:
+        # Try relaxing backslash escapes (LaTeX in text_content)
+        fixed = re.sub(r'\\(?!["\\])', r'\\\\', json_text)
+        try:
+            data = _json.loads(fixed)
+        except _json.JSONDecodeError:
+            return _plain_lines_to_html(json_text)
+
+    if not isinstance(data, list):
+        return _plain_lines_to_html(str(data))
+
+    parts = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        t = item.get("text_content") or item.get("text") or item.get("content", "")
+        t = str(t).strip()
+        if t:
+            # Preserve LaTeX inline/display markers; escape HTML special chars
+            # but don't escape $ signs (KaTeX will process them)
+            parts.append(f"<p>{html.escape(t)}</p>")
+    return parts
+
+
+def _chapter_text_to_html(text: str) -> str:
+    """Convert chapter text to an HTML fragment.
+
+    VLMs produce a mix of output formats across pages:
+      - ```html blocks  → extract <body> content, insert verbatim
+      - ```json blocks  → extract text_content fields, wrap in <p>
+      - ``` (plain)     → treat content as plain text paragraphs
+      - plain text      → wrap in <p>, preserve $...$ LaTeX
+
+    LaTeX formulas ($...$, $$...$$) are left intact for KaTeX auto-render.
     """
     parts: list[str] = []
     last_end = 0
 
-    for m in _HTML_BLOCK_RE.finditer(text):
+    for m in _CODE_BLOCK_RE.finditer(text):
+        lang = m.group(1).lower()
+        block = m.group(2)
+
         # ── plain text before this block ──────────────────────────────────
         before = text[last_end:m.start()].strip()
         if before:
-            for line in before.splitlines():
-                line = line.strip()
-                if line:
-                    parts.append(f"<p>{html.escape(line)}</p>")
+            parts.extend(_plain_lines_to_html(before))
 
-        # ── HTML block: extract <body> content ────────────────────────────
-        block = m.group(1)
-        body_m = _BODY_RE.search(block)
-        inner = body_m.group(1).strip() if body_m else block.strip()
-        if inner:
-            parts.append(inner)
+        # ── dispatch by language tag ──────────────────────────────────────
+        if lang == "html":
+            body_m = _BODY_RE.search(block)
+            inner = body_m.group(1).strip() if body_m else block.strip()
+            if inner:
+                parts.append(inner)
+        elif lang == "json":
+            parts.extend(_json_block_to_html(block))
+        else:
+            # plain ``` or unknown lang — try JSON, fall back to plain text
+            json_parts = _json_block_to_html(block)
+            if json_parts:
+                parts.extend(json_parts)
+            else:
+                parts.extend(_plain_lines_to_html(block))
 
         last_end = m.end()
 
     # ── remaining text after last block ───────────────────────────────────
     remaining = text[last_end:].strip()
     if remaining:
-        for line in remaining.splitlines():
-            line = line.strip()
-            if line:
-                parts.append(f"<p>{html.escape(line)}</p>")
+        parts.extend(_plain_lines_to_html(remaining))
 
     return "\n".join(parts)
 

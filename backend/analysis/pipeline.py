@@ -1,6 +1,8 @@
 """Background analysis pipeline orchestrator."""
 from __future__ import annotations
+import json as _json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -8,6 +10,69 @@ from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+_CODE_BLOCK_RE = re.compile(r'```(\w*)\s*\n(.*?)\n```', re.DOTALL)
+_BODY_RE = re.compile(r'<body>(.*?)</body>', re.DOTALL | re.IGNORECASE)
+
+
+def _normalize_ocr_text(raw: str) -> str:
+    """Normalize VLM OCR output to plain text + LaTeX.
+
+    Models often wrap output in ```json, ```html, or plain ``` blocks despite
+    instructions to the contrary.  This function extracts the actual text so
+    that both html_builder and chat_context get clean content.
+
+    - ```html blocks: kept as-is (html_builder will parse them for structure)
+    - ```json blocks: text_content / text / content fields extracted
+    - plain ``` blocks: try JSON extraction, fall back to literal text
+    - plain text: kept as-is
+    """
+    parts: list[str] = []
+    last_end = 0
+
+    for m in _CODE_BLOCK_RE.finditer(raw):
+        lang = m.group(1).lower()
+        block = m.group(2)
+
+        before = raw[last_end:m.start()].strip()
+        if before:
+            parts.append(before)
+
+        if lang == "html":
+            parts.append(m.group(0))          # keep full fence for html_builder
+        elif lang == "json" or lang == "":
+            try:
+                data = _json.loads(block)
+            except _json.JSONDecodeError:
+                fixed = re.sub(r'\\(?!["\\])', r'\\\\', block)
+                try:
+                    data = _json.loads(fixed)
+                except _json.JSONDecodeError:
+                    data = None
+
+            if isinstance(data, list):
+                texts = []
+                for item in data:
+                    if isinstance(item, dict):
+                        t = item.get("text_content") or item.get("text") or item.get("content", "")
+                        if t:
+                            texts.append(str(t).strip())
+                if texts:
+                    parts.append("\n\n".join(texts))
+                else:
+                    parts.append(block)
+            else:
+                parts.append(block)
+        else:
+            parts.append(block)
+
+        last_end = m.end()
+
+    remaining = raw[last_end:].strip()
+    if remaining:
+        parts.append(remaining)
+
+    return "\n\n".join(p for p in parts if p.strip())
 
 # ── Job registry (in-memory) ──────────────────────────────────────────────────
 
@@ -162,7 +227,8 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg) -> None:
             # Assign page text to chapter
             ch_idx = _page_to_chapter(page_num, chapters)
             if ch_idx is not None:
-                ch_texts[ch_idx] = ch_texts.get(ch_idx, "") + (ocr_text or "") + "\n"
+                cleaned = _normalize_ocr_text(ocr_text or "")
+                ch_texts[ch_idx] = ch_texts.get(ch_idx, "") + cleaned + "\n"
 
             # Describe extracted images (scanned pages already have descriptions from bbox call)
             for img_rec in page_images:
