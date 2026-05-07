@@ -140,7 +140,12 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg) -> None:
                 try:
                     from backend.analysis.image_extractor import _pil_to_b64, _call_vlm
                     b64 = _pil_to_b64(page_img)
-                    ocr_text = _call_vlm(analysis_provider, "Extract all text from this page verbatim.", b64)
+                    ocr_text = _call_vlm(analysis_provider,
+                        "Extract all text from this page verbatim. "
+                        "Output plain text only — no HTML tags, no markdown code fences. "
+                        "Preserve mathematical formulas using LaTeX notation: "
+                        "inline formulas as $...$, display formulas as $$...$$.",
+                        b64)
                 except Exception as e:
                     log.warning("OCR failed page %d: %s", page_num, e)
                     ocr_text = ""
