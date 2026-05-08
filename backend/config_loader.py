@@ -44,12 +44,14 @@ class SearchSettings:
 
 @dataclass
 class TTSConfig:
-    provider: str = "openai"          # "openai" | "local"
+    provider: str = "openai"          # "openai" | "local" | "aivis" | "gemini"
     model: str = "tts-1"
     voice: str = "alloy"
     api_key: str = ""
     binary_path: str = ""             # path to local TTS binary (Kokoro/Piper)
     chunk_size: int = 4000            # max chars per TTS request
+    base_url: str = ""                # base URL for aivis (e.g. http://localhost:10101)
+    speaker_id: int = 0               # speaker/style ID for aivis
 
 
 @dataclass
@@ -179,6 +181,8 @@ def load_config(config_path: str | Path = "./config.json") -> AppConfig:
         api_key=tts_raw.get("api_key", ""),
         binary_path=tts_raw.get("binary_path", ""),
         chunk_size=tts_raw.get("chunk_size", 4000),
+        base_url=tts_raw.get("base_url", ""),
+        speaker_id=tts_raw.get("speaker_id", 0),
     )
 
     analysis_dir_raw = raw.get("analysis_dir")

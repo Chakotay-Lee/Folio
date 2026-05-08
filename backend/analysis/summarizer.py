@@ -9,18 +9,32 @@ MAX_SUMMARY_WORDS = 300
 CONTEXT_CHAR_LIMIT = 320_000
 
 
-def summarize_chapter(text: str, provider, chapter_title: str = "") -> str:
+def summarize_chapter(
+    text: str,
+    provider,
+    chapter_title: str = "",
+    language: str = "",
+    extra_prompt: str = "",
+) -> str:
     """Return a ≤300-word summary of chapter text using the given LLM provider."""
+    import re as _re
     if not text.strip():
         return ""
 
-    body, truncated = _prepare_text(text)
+    # Strip page markers before summarizing
+    clean = _re.sub(r'\[\[PAGE:\d+\]\]\n?', '', text)
+
+    body, truncated = _prepare_text(clean)
     truncation_note = "\n\n[Note: chapter was too long; only the first and last 20% was summarized.]" if truncated else ""
+
+    lang_note  = f" Write the summary in {language}." if language else ""
+    extra_note = f"\n\nAdditional instructions: {extra_prompt}" if extra_prompt else ""
 
     prompt = (
         f"Summarize the following {'chapter' if not chapter_title else repr(chapter_title)} "
-        f"in {MAX_SUMMARY_WORDS} words or fewer. Be concise and focus on key ideas.\n\n"
+        f"in {MAX_SUMMARY_WORDS} words or fewer.{lang_note} Be concise and focus on key ideas.\n\n"
         f"{body}"
+        + extra_note
     )
 
     try:

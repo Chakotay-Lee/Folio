@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Loader2, X, Volume2, Download } from 'lucide-react'
+import { Loader2, X, Play, Pause, Volume2, Download, BookOpen, RefreshCw } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useLang } from '@/lib/LangContext'
+import { useAudioPlayer } from '@/lib/AudioPlayerContext'
 
 type Progress = {
   status: string
@@ -22,12 +24,17 @@ export function AnalysisPage() {
   const { uuid } = useParams<{ uuid: string }>()
   const navigate = useNavigate()
   const { t } = useLang()
+  const { playTrack, togglePlay, currentTrack, isPlaying } = useAudioPlayer()
+  const isDevMode = new URLSearchParams(window.location.search).get('dev') === '1'
   const [progress, setProgress] = useState<Progress | null>(null)
   const [bookTitle, setBookTitle] = useState('')
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
   const [generatingAudio, setGeneratingAudio] = useState<Record<string, boolean>>({})
   const [audioError, setAudioError] = useState<string | null>(null)
+  const [cachedAudio, setCachedAudio] = useState<Record<string, string>>({})
+  const [rebuildingHtml, setRebuildingHtml] = useState(false)
+  const [rebuildMsg, setRebuildMsg] = useState<string | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -53,26 +60,46 @@ export function AnalysisPage() {
     return () => clearInterval(intervalRef.current!)
   }, [uuid])
 
-  // Load manifest when done
+  // Load manifest + TTS cache when done
   useEffect(() => {
     if (progress?.status === 'done' && uuid) {
       api.get<Manifest>(`/books/${uuid}/analysis/manifest`).then(setManifest).catch(() => {})
+      api.get<Record<string, string>>(`/books/${uuid}/analysis/tts-cache`)
+        .then(setCachedAudio).catch(() => {})
     }
   }, [progress?.status, uuid])
 
-  const generateAudio = async (chIdx: number, mode: 'summary' | 'full') => {
+  const generateAudio = async (chIdx: number, mode: 'summary' | 'full', force = false) => {
     if (!uuid) return
     const key = `${chIdx}-${mode}`
     setGeneratingAudio(prev => ({ ...prev, [key]: true }))
+    if (force) {
+      setAudioUrls(prev => { const n = { ...prev }; delete n[key]; return n })
+      setCachedAudio(prev => { const n = { ...prev }; delete n[key]; return n })
+    }
     try {
       setAudioError(null)
-      const { audio_url } = await api.post<{ audio_url: string }>(`/books/${uuid}/analysis/tts`, { chapter: chIdx, mode })
+      const { audio_url } = await api.post<{ audio_url: string }>(`/books/${uuid}/analysis/tts`, { chapter: chIdx, mode, force })
       setAudioUrls(prev => ({ ...prev, [key]: audio_url }))
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'TTS failed'
       try { setAudioError(JSON.parse(msg).detail ?? msg) } catch { setAudioError(msg) }
     } finally {
       setGeneratingAudio(prev => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const handleRebuildHtml = async () => {
+    if (!uuid) return
+    setRebuildingHtml(true)
+    setRebuildMsg(null)
+    try {
+      const r = await api.post<{ chapters: number; files: number }>(`/books/${uuid}/analysis/rebuild-html`, {})
+      setRebuildMsg(`Rebuilt ${r.files} files (${r.chapters} chapters)`)
+    } catch {
+      setRebuildMsg('Rebuild failed')
+    } finally {
+      setRebuildingHtml(false)
     }
   }
 
@@ -164,14 +191,41 @@ export function AnalysisPage() {
           {/* Done: export + chapters with TTS */}
           {progress.status === 'done' && uuid && (
             <div className="space-y-4 pt-2">
-              <a
-                href={`/api/books/${uuid}/analysis/export`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm rounded-xl transition-colors">
-                <Download className="w-3.5 h-3.5" />
-                {t('analysis.exportHtml') as string}
-              </a>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`/api/books/${uuid}/analysis/chapters/index.html`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 text-sm rounded-xl transition-colors">
+                  <BookOpen className="w-3.5 h-3.5" />
+                  {t('analysis.browseChapters') as string}
+                </a>
+                <a
+                  href={`/api/books/${uuid}/analysis/export`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm rounded-xl transition-colors">
+                  <Download className="w-3.5 h-3.5" />
+                  {t('analysis.exportHtml') as string}
+                </a>
+                {isDevMode && (
+                  <button
+                    onClick={handleRebuildHtml}
+                    disabled={rebuildingHtml}
+                    title="Re-generate HTML from existing text files (no re-analysis)"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-500 hover:bg-slate-50 text-sm rounded-xl transition-colors disabled:opacity-50">
+                    {rebuildingHtml
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <RefreshCw className="w-3.5 h-3.5" />}
+                    Rebuild HTML
+                  </button>
+                )}
+              </div>
+              {rebuildMsg && (
+                <p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5">
+                  {rebuildMsg}
+                </p>
+              )}
 
               {audioError && (
                 <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
@@ -186,33 +240,51 @@ export function AnalysisPage() {
                     {manifest.chapters.map(ch => (
                       <div key={ch.index} className="bg-white border border-slate-100 rounded-xl p-3 space-y-2">
                         <p className="text-sm font-medium text-slate-700">{ch.index}. {ch.title}</p>
-                        <div className="flex flex-wrap gap-2">
-                          {/* Summary TTS */}
-                          {audioUrls[`${ch.index}-summary`] ? (
-                            <audio controls className="h-8 w-48" src={audioUrls[`${ch.index}-summary`]} />
-                          ) : (
-                            <button
-                              onClick={() => generateAudio(ch.index, 'summary')}
-                              disabled={generatingAudio[`${ch.index}-summary`]}
-                              className="flex items-center gap-1 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-                              {generatingAudio[`${ch.index}-summary`]
-                                ? <><Loader2 className="w-3 h-3 animate-spin" />{t('analysis.generating') as string}</>
-                                : <><Volume2 className="w-3 h-3" />{t('analysis.listenSummary') as string}</>}
-                            </button>
-                          )}
-                          {/* Full chapter TTS */}
-                          {audioUrls[`${ch.index}-full`] ? (
-                            <audio controls className="h-8 w-48" src={audioUrls[`${ch.index}-full`]} />
-                          ) : (
-                            <button
-                              onClick={() => generateAudio(ch.index, 'full')}
-                              disabled={generatingAudio[`${ch.index}-full`]}
-                              className="flex items-center gap-1 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-                              {generatingAudio[`${ch.index}-full`]
-                                ? <><Loader2 className="w-3 h-3 animate-spin" />{t('analysis.generating') as string}</>
-                                : <><Volume2 className="w-3 h-3" />{t('analysis.listenChapter') as string}</>}
-                            </button>
-                          )}
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {(['summary', 'full'] as const).map(mode => {
+                            const key = `${ch.index}-${mode}`
+                            const url = audioUrls[key] || cachedAudio[key]
+                            const busy = generatingAudio[key]
+                            const label = mode === 'summary' ? t('analysis.listenSummary') as string : t('analysis.listenChapter') as string
+                            const active = currentTrack?.url === url && !!url
+
+                            if (busy) return (
+                              <span key={key} className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400">
+                                <Loader2 className="w-3 h-3 animate-spin" />{t('analysis.generating') as string}
+                              </span>
+                            )
+                            if (url) return (
+                              <div key={key} className="flex items-center gap-1">
+                                <button
+                                  onClick={() => active ? togglePlay() : playTrack({ url, title: label, subtitle: bookTitle })}
+                                  className={cn(
+                                    'flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg border transition-colors',
+                                    active && isPlaying
+                                      ? 'bg-amber-400 border-amber-400 text-slate-900 font-medium'
+                                      : active
+                                        ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                  )}>
+                                  {active && isPlaying
+                                    ? <><Pause className="w-3 h-3" />{t('analysis.pause') as string}</>
+                                    : <><Play className="w-3 h-3" />{label}</>}
+                                </button>
+                                <button
+                                  onClick={() => generateAudio(ch.index, mode, true)}
+                                  title={t('analysis.regenerate') as string}
+                                  className="p-1 text-slate-300 hover:text-amber-500 transition-colors">
+                                  <RefreshCw className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )
+                            return (
+                              <button key={key}
+                                onClick={() => generateAudio(ch.index, mode)}
+                                className="flex items-center gap-1 px-2 py-1 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">
+                                <Volume2 className="w-3 h-3" />{label}
+                              </button>
+                            )
+                          })}
                         </div>
                       </div>
                     ))}

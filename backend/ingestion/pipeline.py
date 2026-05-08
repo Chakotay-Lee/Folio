@@ -37,6 +37,22 @@ def ingest_file(file_path: str | Path, config) -> IngestionResult:
         append_log(IngestionLog(**result.__dict__))
         return result
 
+    # Quick relative_path pre-check before any expensive work.
+    # Catches the common case where the file watcher picks up the post-move
+    # destination path and tries to re-ingest an already-indexed book.
+    books_root = config.storage.books_root
+    try:
+        relative_path = str(path.relative_to(books_root))
+    except ValueError:
+        relative_path = str(path)
+
+    with get_core_session() as session:
+        from sqlmodel import select as _precheck
+        already = session.exec(_precheck(Book).where(Book.relative_path == relative_path)).first()
+    if already:
+        logger.debug("Skipping already-indexed file: %s", relative_path)
+        return IngestionResult(uuid=already.id, title=already.title, status="skipped", message="Already indexed")
+
     text = extract_text(path, max_pages=config.search.max_pages_to_analyze)
 
     with get_core_session() as session:
@@ -63,11 +79,6 @@ def ingest_file(file_path: str | Path, config) -> IngestionResult:
 
         import json
         book_uuid = str(_uuid.uuid4())
-        books_root = config.storage.books_root
-        try:
-            relative_path = str(path.relative_to(books_root))
-        except ValueError:
-            relative_path = str(path)
 
         from sqlmodel import select as _select
         existing = session.exec(_select(Book).where(Book.relative_path == relative_path)).first()

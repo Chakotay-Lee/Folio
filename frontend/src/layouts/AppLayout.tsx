@@ -4,9 +4,11 @@ import {
   BookOpen, Search, FolderOpen, Library, BarChart2, Settings, Code2,
 } from 'lucide-react'
 import { useLang } from '@/lib/LangContext'
+import { useAudioPlayer } from '@/lib/AudioPlayerContext'
 
 export function AppLayout() {
   const { t } = useLang()
+  const { currentTrack } = useAudioPlayer()
 
   const navItems = [
     { to: '/', label: t('nav.library') as string, icon: BookOpen, end: true },
@@ -55,11 +57,11 @@ export function AppLayout() {
         </nav>
 
         <div className="px-4 py-3 border-t border-slate-800">
-          <p className="text-xs text-slate-700">v0.1.0</p>
+          <p className="text-xs text-slate-700">v0.2.dev.1</p>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
+      <main className={cn('flex-1 overflow-y-auto', currentTrack && 'pb-16')}>
         <Outlet />
       </main>
     </div>

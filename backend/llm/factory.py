@@ -19,7 +19,12 @@ def get_provider(config: LLMModelConfig) -> LLMProvider:
     if provider == "openai":
         from backend.llm.openai_provider import OpenAIProvider
         return OpenAIProvider(**kwargs)
+    if provider == "gemini":
+        from backend.llm.openai_provider import OpenAIProvider
+        if not kwargs.get("base_url"):
+            kwargs["base_url"] = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        return OpenAIProvider(**kwargs)
     if provider == "anthropic":
         from backend.llm.anthropic_provider import AnthropicProvider
         return AnthropicProvider(**kwargs)
-    raise ValueError(f"Unknown LLM provider: '{provider}'. Supported: ollama, openai, anthropic")
+    raise ValueError(f"Unknown LLM provider: '{provider}'. Supported: ollama, openai, anthropic, gemini")
