@@ -439,7 +439,7 @@ wheels = [
 
 [[package]]
 name = "folio-backend"
-version = "0.2.0"
+version = "0.2.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
