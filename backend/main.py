@@ -27,11 +27,14 @@ async def lifespan(app: FastAPI):
     init_activity_db(cfg.storage.user_activity_db)
 
     emb = cfg.llms.embedding_model
+    emb_base_url = emb.base_url
+    if emb.provider.lower() == "gemini" and not emb_base_url:
+        emb_base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
     vs.init_vector_store(
         store_path=cfg.storage.vector_store,
         embedding_model=emb.model_name,
         api_key=emb.api_key,
-        base_url=emb.base_url,
+        base_url=emb_base_url,
         dimension=emb.dimension,
     )
     app.state.vector_store = vs
@@ -53,7 +56,7 @@ async def lifespan(app: FastAPI):
     watcher.stop_watcher()
 
 
-app = FastAPI(title="Folio API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Folio API", version="0.2.dev.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -944,7 +947,7 @@ async def scan_custom_path(request: Request):
 
 from backend.routers.analysis import router as analysis_router
 from backend.routers.chat import router as chat_router
-from backend.routers.tts import router as tts_router
+from backend.routers.tts import router as tts_router, util_router as tts_util_router
 
 app.include_router(health_router)
 app.include_router(search_router)
@@ -952,6 +955,7 @@ app.include_router(books_router)
 app.include_router(analysis_router)
 app.include_router(chat_router)
 app.include_router(tts_router)
+app.include_router(tts_util_router)
 app.include_router(config_router)
 app.include_router(user_data_router)
 app.include_router(reindex_router)

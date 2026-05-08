@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = {".pdf", ".epub", ".txt", ".md"}
 
 _task: asyncio.Task | None = None
+_in_progress: set[str] = set()   # paths currently being ingested
 
 
 async def _watch_loop(paths: list[Path], config) -> None:
@@ -25,8 +26,15 @@ async def _watch_loop(paths: list[Path], config) -> None:
             path = Path(path_str)
             if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
+            if path_str in _in_progress:
+                logger.debug("Skipping already-in-progress file: %s", path.name)
+                continue
             logger.info("Detected new file: %s", path)
-            await asyncio.to_thread(_ingest, path, config)
+            _in_progress.add(path_str)
+            try:
+                await asyncio.to_thread(_ingest, path, config)
+            finally:
+                _in_progress.discard(path_str)
 
 
 def _ingest(path: Path, config) -> None:

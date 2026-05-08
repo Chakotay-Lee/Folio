@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Save, CheckCircle, AlertCircle, Cpu, Search, Eye, Globe, Sparkles, Plus, X, Volume2 } from 'lucide-react'
+import { Save, CheckCircle, AlertCircle, Cpu, Search, Eye, Globe, Sparkles, Plus, X, Volume2, RefreshCw, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, ApiError } from '@/lib/api'
 import { useLang } from '@/lib/LangContext'
@@ -17,6 +17,8 @@ type TTSConfig = {
   api_key: string
   binary_path: string
   chunk_size: number
+  base_url: string
+  speaker_id: number
 }
 
 type ConfigShape = {
@@ -31,8 +33,18 @@ type ConfigShape = {
   ocr: { enabled: boolean; min_chars_threshold: number }
 }
 
-const PROVIDERS = ['openai', 'ollama', 'anthropic']
-const TTS_PROVIDERS = ['openai', 'local']
+const PROVIDERS = ['openai', 'ollama', 'anthropic', 'gemini']
+const GEMINI_LLM_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+const TTS_PROVIDERS = ['openai', 'aivis', 'gemini', 'local']
+// Common Gemini prebuilt voices — list may expand with newer models; free-text input is also accepted
+const GEMINI_VOICES_SUGGESTIONS = [
+  'Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck',
+  'Zephyr', 'Achird', 'Algenib', 'Algieba', 'Alnilam',
+  'Autonoe', 'Callirrhoe', 'Despina', 'Enceladus', 'Erinome',
+  'Gacrux', 'Iocaste', 'Isonoe', 'Laomedeia', 'Leda',
+  'Orus', 'Pulcherrima', 'Rasalgethi', 'Sadachbia', 'Sadaltager',
+  'Schedar', 'Sulafat', 'Umbriel', 'Vindemiatrix', 'Zubenelgenubi',
+]
 const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -49,10 +61,11 @@ function inputCls() {
 }
 
 function ModelSection({
-  title, icon: Icon, value, onChange,
+  title, icon: Icon, value, onChange, baseUrlPlaceholder,
 }: {
   title: string; icon: React.ElementType
   value: ModelConfig; onChange: (patch: Partial<ModelConfig>) => void
+  baseUrlPlaceholder?: string
 }) {
   const { t } = useLang()
   return (
@@ -83,7 +96,7 @@ function ModelSection({
       </div>
 
       <Field label={t('settings.baseUrl') as string}>
-        <input type="text" value={value.base_url} onChange={e => onChange({ base_url: e.target.value })} className={inputCls()} />
+        <input type="text" value={value.base_url} placeholder={baseUrlPlaceholder} onChange={e => onChange({ base_url: e.target.value })} className={inputCls()} />
       </Field>
 
       <div className="grid grid-cols-3 gap-3">
@@ -107,16 +120,21 @@ function ModelSection({
   )
 }
 
+type AivisSpeaker = { label: string; id: number }
+
 export function SettingsPage() {
   const { lang, setLang, t } = useLang()
   const [config, setConfig] = useState<ConfigShape | null>(null)
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'ok' | 'error'>('loading')
   const [errorMsg, setErrorMsg] = useState('')
+  const [aivisSpeakers, setAivisSpeakers] = useState<AivisSpeaker[]>([])
+  const [fetchingSpeakers, setFetchingSpeakers] = useState(false)
+  const [speakerFetchError, setSpeakerFetchError] = useState<string | null>(null)
 
   useEffect(() => {
     api.get<ConfigShape>('/config')
       .then(data => {
-        if (!data.tts) data.tts = { provider: 'openai', model: 'tts-1', voice: 'alloy', api_key: '', binary_path: '', chunk_size: 4000 }
+        if (!data.tts) data.tts = { provider: 'openai', model: 'tts-1', voice: 'alloy', api_key: '', binary_path: '', chunk_size: 4000, base_url: '', speaker_id: 0 }
         setConfig(data)
         setStatus('idle')
       })
@@ -125,6 +143,28 @@ export function SettingsPage() {
 
   const patchModel = (key: keyof ConfigShape['llms']) => (patch: Partial<ModelConfig>) =>
     setConfig(c => c ? { ...c, llms: { ...c.llms, [key]: { ...c.llms[key], ...patch } } } : c)
+
+  const fetchAivisSpeakers = async () => {
+    const baseUrl = config?.tts?.base_url || 'http://localhost:10101'
+    setFetchingSpeakers(true)
+    setSpeakerFetchError(null)
+    try {
+      const data = await api.get<{ name: string; styles: { name: string; id: number }[] }[]>(
+        `/tts/aivis-speakers?base_url=${encodeURIComponent(baseUrl)}`
+      )
+      const speakers = data.flatMap(sp =>
+        sp.styles.map(st => ({ label: `${sp.name} — ${st.name}`, id: st.id }))
+      )
+      setAivisSpeakers(speakers)
+      if (speakers.length > 0 && !config?.tts?.speaker_id) {
+        setConfig(c => c ? { ...c, tts: { ...c.tts, speaker_id: speakers[0].id } } : c)
+      }
+    } catch {
+      setSpeakerFetchError('Cannot reach AIVIS server. Check URL and ensure the server is running.')
+    } finally {
+      setFetchingSpeakers(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!config) return
@@ -185,9 +225,9 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <ModelSection title={t('settings.extractionModel') as string} icon={Cpu} value={config.llms.extraction_model} onChange={patchModel('extraction_model')} />
-      <ModelSection title={t('settings.embeddingModel') as string} icon={Search} value={config.llms.embedding_model} onChange={patchModel('embedding_model')} />
-      <ModelSection title={t('settings.chatModel') as string} icon={Eye} value={config.llms.chat_model} onChange={patchModel('chat_model')} />
+      <ModelSection title={t('settings.extractionModel') as string} icon={Cpu} value={config.llms.extraction_model} onChange={patchModel('extraction_model')} baseUrlPlaceholder={config.llms.extraction_model.provider === 'gemini' ? GEMINI_LLM_BASE_URL : undefined} />
+      <ModelSection title={t('settings.embeddingModel') as string} icon={Search} value={config.llms.embedding_model} onChange={patchModel('embedding_model')} baseUrlPlaceholder={config.llms.embedding_model.provider === 'gemini' ? GEMINI_LLM_BASE_URL : undefined} />
+      <ModelSection title={t('settings.chatModel') as string} icon={Eye} value={config.llms.chat_model} onChange={patchModel('chat_model')} baseUrlPlaceholder={config.llms.chat_model.provider === 'gemini' ? GEMINI_LLM_BASE_URL : undefined} />
 
       {/* Analysis model (optional — falls back to extraction_model if absent) */}
       {config.llms.analysis_model ? (
@@ -197,6 +237,7 @@ export function SettingsPage() {
             icon={Sparkles}
             value={config.llms.analysis_model}
             onChange={patchModel('analysis_model')}
+            baseUrlPlaceholder={config.llms.analysis_model.provider === 'gemini' ? GEMINI_LLM_BASE_URL : undefined}
           />
           <button
             onClick={() => setConfig(c => c ? { ...c, llms: { ...c.llms, analysis_model: undefined } } : c)}
@@ -277,13 +318,17 @@ export function SettingsPage() {
         <Field label={t('settings.ttsProvider') as string}>
           <select
             value={config.tts?.provider ?? 'openai'}
-            onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, provider: e.target.value } } : c)}
+            onChange={e => {
+              const p = e.target.value
+              const defaultVoice = p === 'openai' ? 'alloy' : p === 'gemini' ? 'Aoede' : ''
+              setConfig(c => c ? { ...c, tts: { ...c.tts, provider: p, voice: defaultVoice } } : c)
+            }}
             className={inputCls()}>
             {TTS_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </Field>
 
-        {(config.tts?.provider ?? 'openai') === 'openai' ? (
+        {(config.tts?.provider ?? 'openai') === 'openai' && (
           <>
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('settings.ttsModel') as string}>
@@ -306,7 +351,78 @@ export function SettingsPage() {
                 className={inputCls()} />
             </Field>
           </>
-        ) : (
+        )}
+
+        {config.tts?.provider === 'gemini' && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={t('settings.ttsModel') as string}>
+                <input type="text" value={config.tts?.model ?? 'gemini-2.5-flash-preview-tts'}
+                  onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, model: e.target.value } } : c)}
+                  placeholder="gemini-2.5-flash-preview-tts"
+                  className={inputCls()} />
+              </Field>
+              <Field label={t('settings.ttsVoice') as string}>
+                <select
+                  value={config.tts?.voice ?? 'Aoede'}
+                  onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, voice: e.target.value } } : c)}
+                  className={inputCls()}>
+                  {GEMINI_VOICES_SUGGESTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label={t('settings.apiKey') as string}>
+              <input type="password" value={config.tts?.api_key ?? ''}
+                onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, api_key: e.target.value } } : c)}
+                className={inputCls()} />
+            </Field>
+          </>
+        )}
+
+        {config.tts?.provider === 'aivis' && (
+          <>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Field label={t('settings.ttsBaseUrl') as string}>
+                  <input type="text" value={config.tts?.base_url ?? ''}
+                    placeholder="http://localhost:10101"
+                    onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, base_url: e.target.value } } : c)}
+                    className={inputCls()} />
+                </Field>
+              </div>
+              <button
+                onClick={fetchAivisSpeakers}
+                disabled={fetchingSpeakers}
+                className="mb-0.5 flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm rounded-xl transition-colors disabled:opacity-50 shrink-0">
+                {fetchingSpeakers
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <RefreshCw className="w-3.5 h-3.5" />}
+                {t('settings.ttsFetchSpeakers') as string}
+              </button>
+            </div>
+            {speakerFetchError && (
+              <p className="text-xs text-red-500">{speakerFetchError}</p>
+            )}
+            <Field label={t('settings.ttsSpeakerId') as string}>
+              {aivisSpeakers.length > 0 ? (
+                <select
+                  value={config.tts?.speaker_id ?? 0}
+                  onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, speaker_id: Number(e.target.value) } } : c)}
+                  className={inputCls()}>
+                  {aivisSpeakers.map(s => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <input type="number" value={config.tts?.speaker_id ?? 0}
+                  onChange={e => setConfig(c => c ? { ...c, tts: { ...c.tts, speaker_id: Number(e.target.value) } } : c)}
+                  className={cn(inputCls(), 'max-w-40')} />
+              )}
+            </Field>
+          </>
+        )}
+
+        {config.tts?.provider === 'local' && (
           <Field label={t('settings.ttsBinaryPath') as string}>
             <input type="text" value={config.tts?.binary_path ?? ''}
               placeholder="/usr/local/bin/piper"

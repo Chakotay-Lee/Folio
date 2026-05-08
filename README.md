@@ -12,6 +12,10 @@ A self-hosted personal library system. Drop your PDF, EPUB, TXT, and Markdown fi
 > Folio calls an LLM for **every book** it processes to extract metadata (title, author, summary, tags, and genre). On a large library this can consume a significant number of tokens. Using a commercial API such as OpenAI or Anthropic may result in unexpected costs.
 > **Running a local model via [Ollama](https://ollama.ai) is strongly recommended.**
 >
+> **Deep analysis token cost can be substantial**
+>
+> Deep analysis processes every page of a book sequentially. A 300-page scanned book with figures can consume **500,000–1,000,000+ tokens** when using a cloud model. Always test with a small page range first, or use Quick mode. See the [Deep Analysis Guide](docs/deep-analysis.md#token-cost) for estimates.
+>
 > **OCR requires a vision-capable (multimodal) model**
 >
 > The optional OCR feature sends page images to an LLM to extract text from scanned or image-only PDFs. This requires a model that supports **image input** — a text-only model will not work. Recommended options include [Qwen2-VL](https://ollama.ai/library/qwen2-vl), Gemma 3/4, LLaVA, or any other multimodal model available through your provider.
@@ -30,9 +34,9 @@ A self-hosted personal library system. Drop your PDF, EPUB, TXT, and Markdown fi
 - **i18n UI** — interface language switchable between English, 繁體中文, 简体中文, 日本語
 - **AI output language** — summary, tags, and genre can be generated in any supported language
 - **OCR support** — optional VLM-based OCR pass for scanned/image-only PDFs; uses the configured `analysis_model` (or `extraction_model`) to extract text from page images
-- **Deep analysis** — manually trigger per-book AI pipeline: chapter detection, full-text extraction, figure extraction (native PDF via PyMuPDF; scanned PDF via VLM bounding box), per-figure descriptions, chapter summaries, and self-contained HTML export. Configure `llms.analysis_model` in `config.json` (defaults to `extraction_model`).
+- **Deep analysis** — manually trigger per-book AI pipeline that unlocks HTML export, TTS audio, and full-context Book Chat. Includes chapter detection, full-text extraction, figure extraction, per-figure descriptions, chapter summaries, and self-contained HTML export. An optional output language setting generates AI-produced summaries in your chosen language as a **personal reading aid** — not as a translation of the original work. → [Deep Analysis Guide](docs/deep-analysis.md)
 - **Book Chat** — RAG-based conversational Q&A with any analyzed book. Chapter **summaries** are sent as baseline context; full chapter text is fetched on demand via **tool calling**, keeping token usage low even for large books. Figures are referenced by ID and rendered inline. Persistent sessions stored locally.
-- **TTS** — Generate audio from chapter summaries or full chapter text. Supports **OpenAI TTS API** (models: `tts-1`/`tts-1-hd`; voices: alloy, echo, fable, onyx, nova, shimmer) and **local binary** engines (Piper, Kokoro, or any stdin→stdout MP3 binary). Configure in Settings. Access via the book detail panel → **Analysis & TTS**.
+- **TTS** — Generate audio from chapter summaries or full chapter text. Supports **OpenAI TTS API** (models: `tts-1`/`tts-1-hd`; voices: alloy, echo, fable, onyx, nova, shimmer), **AIVIS** (VOICEVOX-compatible local server), **Gemini TTS**, and **local binary** engines (Piper, Kokoro, or any stdin→stdout MP3 binary). Configure in Settings. Access via the book detail panel → **Analysis & TTS**.
 
 ---
 
@@ -45,8 +49,19 @@ After triggering a deep analysis on a book, Folio runs a full AI pipeline:
 1. **Chapter detection** — identifies chapter boundaries across the whole PDF
 2. **Text extraction** — extracts full text per chapter (VLM OCR for scanned pages)
 3. **Figure extraction** — locates and crops embedded images; generates a description for each
-4. **Chapter summaries** — produces a ≤300-word summary per chapter using the configured LLM
-5. **HTML export** — bundles the summaries, figures, and metadata into a self-contained HTML file
+4. **Chapter summaries** — produces a ≤300-word summary per chapter; the optional language setting outputs summaries in your chosen language as a personal reading aid, not as a reproduction or translation of the original text
+5. **HTML export** — bundles the summaries, figures, and metadata into a self-contained HTML file intended for personal reference only
+
+The **extra prompt** field lets you customise how the AI reads and summarises the book. Some examples:
+
+| Prompt | Effect |
+|---|---|
+| `"Explain each chapter as if I were a primary school student"` | Simplified language, great for unfamiliar subjects |
+| `"End every paragraph with 'meow' and narrate in a cat's voice"` | Playful retelling — useful for making dense content memorable |
+| `"Illustrate each chapter's core idea with one real-world analogy"` | Conceptual understanding through comparison |
+| `"Give me 3 bullet-point takeaways per chapter, no filler"` | Rapid, structured review |
+
+These outputs are personal reading aids. Do not distribute AI-generated content derived from copyrighted works.
 
 Once analysis is complete, open **Book Chat** to have a conversation with the AI about the book. The AI receives chapter summaries as baseline context and fetches full chapter text on demand via tool calling — keeping token usage low while still being able to answer detailed questions. Extracted figures are displayed inline when referenced.
 
@@ -192,10 +207,12 @@ Open **http://localhost:5200** in your browser.
 | `llms.embedding_model` | Model used for semantic embeddings | — |
 | `llms.chat_model` | Model used for chat features | — |
 | `llms.analysis_model` | VLM used for deep analysis (figure extraction, OCR, descriptions). Falls back to `extraction_model` if unset | — |
-| `tts.provider` | TTS engine: `openai` or `local` | `"openai"` |
-| `tts.model` | OpenAI TTS model (`tts-1` or `tts-1-hd`) | `"tts-1"` |
-| `tts.voice` | OpenAI voice (`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`) | `"alloy"` |
-| `tts.api_key` | OpenAI API key for TTS | `""` |
+| `tts.provider` | TTS engine: `openai`, `aivis`, `gemini`, or `local` | `"openai"` |
+| `tts.model` | OpenAI/Gemini TTS model (`tts-1`, `tts-1-hd`, `gemini-2.5-flash-preview-tts`, …) | `"tts-1"` |
+| `tts.voice` | Voice name (OpenAI: `alloy`/`echo`/…; Gemini: `Aoede`/`Charon`/…) | `"alloy"` |
+| `tts.api_key` | API key (required for `openai` and `gemini` providers) | `""` |
+| `tts.base_url` | Base URL for AIVIS server (e.g. `http://localhost:10101`) | `""` |
+| `tts.speaker_id` | Speaker/style ID for AIVIS | `0` |
 | `tts.binary_path` | Path to local TTS binary (for `provider: local`) | `""` |
 | `tts.chunk_size` | Max characters per TTS request | `4000` |
 | `search_settings.top_k` | Number of semantic search results | `10` |
@@ -209,7 +226,7 @@ LLM provider fields (for each of `extraction_model`, `embedding_model`, `chat_mo
 
 | Field | Description |
 |---|---|
-| `provider` | `openai`, `ollama`, or `anthropic` |
+| `provider` | `openai`, `ollama`, `anthropic`, or `gemini` |
 | `model_name` | Model identifier |
 | `base_url` | API base URL (required for Ollama and custom OpenAI endpoints) |
 | `api_key` | API key (leave empty for Ollama) |
@@ -288,6 +305,22 @@ If you change the embedding model, the existing vector index becomes incompatibl
 | Figure extraction accuracy on scanned PDFs | Figure boundary detection on scanned pages relies on VLM bounding-box inference, which can misidentify regions or miss figures entirely. Native (text-layer) PDFs are more reliable. |
 | Recommended model for figures | **Qwen2-VL / Qwen3** currently gives the highest figure detection accuracy among tested models. Other VLMs (LLaVA, Gemma) may produce more errors. |
 | Large book token usage | Deep analysis processes every page sequentially. Very large books (500+ pages) may take significant time and tokens depending on the model and provider. |
+
+---
+
+## Legal Notice
+
+> **This section does not constitute legal advice. Consult a qualified attorney if you have specific legal concerns.**
+
+**Personal use only.** Folio is designed as a self-hosted, personal-use tool for managing books and documents you legally own. It is not intended to facilitate the reproduction, redistribution, or commercial exploitation of copyrighted works.
+
+**User content responsibility.** Users are solely responsible for ensuring they have the legal right to store, index, and process any files they add to Folio. The authors of this project do not condone or support the use of this tool with unlawfully obtained materials.
+
+**Third-party service privacy.** When using cloud-based LLM providers (OpenAI, Anthropic, Google Gemini, etc.), the text content of your books—including extracted passages and summaries—is transmitted to those providers' servers for processing. Review each provider's privacy policy and terms of service before use. To keep your data entirely local, use [Ollama](https://ollama.ai) with a local model.
+
+**Translation and derivative works.** The language output option generates AI-produced summaries and reading notes in a chosen language to support personal comprehension of works you legally possess. These outputs are concise reading aids based on AI interpretation — they are not full or substantial reproductions of the original text. Under most copyright frameworks, the right to translate is an exclusive right of the copyright holder (e.g., U.S. Copyright Act §106(2); Berne Convention Art. 8). Users must not use Folio to produce, distribute, or publish translated versions of copyrighted works, or any other derivative work, without authorization from the rights holder.
+
+**No warranty.** This software is provided as-is, without warranty of any kind. See the [MIT License](#license) below for the full disclaimer.
 
 ---
 

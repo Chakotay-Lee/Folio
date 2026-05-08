@@ -8,6 +8,7 @@ import { bookCoverColor, parseTags, tagColor, formatBytes } from '@/lib/bookUtil
 import { openBook } from './BookContextMenu'
 import { EditBookModal } from './EditBookModal'
 import { ConfirmRemoveModal } from './ConfirmRemoveModal'
+import { AnalysisConfirmModal, type AnalysisOptions } from './AnalysisConfirmModal'
 import { useLang } from '@/lib/LangContext'
 
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
@@ -40,16 +41,16 @@ export function BookDetailModal({ book, defaultOpenMode = 'system', onClose, onR
   const [showEdit, setShowEdit] = useState(false)
   const [showRemove, setShowRemove] = useState(false)
   const [analysisStatus] = useState(book.analysis_status ?? 'none')
-  const [triggeringAnalysis, setTriggeringAnalysis] = useState(false)
+  const [showAnalysisConfirm, setShowAnalysisConfirm] = useState(false)
 
-  const handleTriggerAnalysis = async () => {
-    setTriggeringAnalysis(true)
+  const handleTriggerAnalysis = async (opts: AnalysisOptions) => {
+    setShowAnalysisConfirm(false)
     try {
-      await api.post(`/books/${book.id}/analysis/trigger`, {})
+      await api.post(`/books/${book.id}/analysis/trigger`, opts)
       onClose()
       navigate(`/books/${book.id}/analysis`)
     } catch {
-      setTriggeringAnalysis(false)
+      // trigger failed — modal is already closed, nothing to reset
     }
   }
 
@@ -209,19 +210,15 @@ export function BookDetailModal({ book, defaultOpenMode = 'system', onClose, onR
           <div className="px-6 pb-4 flex items-center gap-2 flex-wrap">
             {analysisStatus === 'none' || analysisStatus === 'failed' ? (
               <button
-                onClick={handleTriggerAnalysis}
-                disabled={triggeringAnalysis}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 text-xs font-medium rounded-xl transition-colors disabled:opacity-50">
-                {triggeringAnalysis
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <Sparkles className="w-3.5 h-3.5" />}
+                onClick={() => setShowAnalysisConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 text-xs font-medium rounded-xl transition-colors">
+                <Sparkles className="w-3.5 h-3.5" />
                 {t(analysisStatus === 'failed' ? 'analysis.reanalyze' : 'analysis.deepAnalysis') as string}
               </button>
             ) : analysisStatus === 'done' ? (
               <button
-                onClick={handleTriggerAnalysis}
-                disabled={triggeringAnalysis}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:bg-slate-50 border border-slate-200 text-xs rounded-xl transition-colors disabled:opacity-50">
+                onClick={() => setShowAnalysisConfirm(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-slate-500 hover:bg-slate-50 border border-slate-200 text-xs rounded-xl transition-colors">
                 <Sparkles className="w-3.5 h-3.5" />
                 {t('analysis.reanalyze') as string}
               </button>
@@ -270,6 +267,14 @@ export function BookDetailModal({ book, defaultOpenMode = 'system', onClose, onR
           bookTitle={book.title}
           onConfirm={() => { setShowRemove(false); onRemoved?.(book.id); onClose() }}
           onCancel={() => setShowRemove(false)}
+        />
+      )}
+      {showAnalysisConfirm && (
+        <AnalysisConfirmModal
+          bookTitle={book.title}
+          isReanalyze={analysisStatus === 'done' || analysisStatus === 'failed'}
+          onConfirm={handleTriggerAnalysis}
+          onCancel={() => setShowAnalysisConfirm(false)}
         />
       )}
     </>,

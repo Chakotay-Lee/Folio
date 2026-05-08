@@ -12,6 +12,10 @@
 > Folio 在处理**每一本书**时都会调用 LLM 来提取元数据（书名、作者、摘要、标签、分类）。书库较大时，累积的 Token 用量相当可观。若使用 OpenAI 或 Anthropic 等商业 API，费用可能迅速累积。
 > **强烈建议通过 [Ollama](https://ollama.ai) 在本地运行模型，既免费又保护隐私。**
 >
+> **深度解析的 Token 消耗可能相当可观**
+>
+> 深度解析会逐页处理整本书。一本含图表的 300 页扫描书籍，使用云端模型时可能消耗 **50 万至 100 万以上 Token**。建议先用页码范围进行小范围测试，或使用 Quick 模式。详见[深度解析使用指南](docs/deep-analysis.zh-CN.md#token-消耗估算)。
+>
 > **OCR 功能需要支持视觉（多模态）的模型**
 >
 > 可选的 OCR 功能会将页面图片发送给 LLM，以识别纯图片或扫描版 PDF 中的文字。此功能需要支持**图片输入**的模型，纯文本模型无法使用。建议选择 [Qwen2-VL](https://ollama.ai/library/qwen2-vl)、Gemma 3/4、LLaVA 或其他支持多模态输入的模型。
@@ -30,9 +34,9 @@
 - **多语言界面** — 支持 English、繁體中文、简体中文、日本語
 - **AI 输出语言** — 摘要、标签、分类可用任意支持的语言生成
 - **OCR 支持** — 可选配 VLM 识别，将扫描版/纯图片 PDF 的页面图片送交 `analysis_model`（或 `extraction_model`）提取文字
-- **深度解析** — 手动触发逐本 AI 分析流程：章节检测、全文提取、图形提取（原生 PDF 使用 PyMuPDF；扫描 PDF 使用 VLM 边界框）、图形描述、章节摘要、自含式 HTML 导出。在 `config.json` 中设置 `llms.analysis_model`（默认沿用 `extraction_model`）。
+- **深度解析** — 手动触发逐本 AI 分析流程，完成后解锁 HTML 导出、TTS 语音及完整内文 Book Chat。包含章节检测、全文提取、图形提取、图形描述、章节摘要及独立 HTML 导出。可选的输出语言设置，可让 AI 以指定语言生成章节摘要，作为个人**阅读辅助**用途，并非原著的翻译版本。 → [深度解析使用指南](docs/deep-analysis.zh-CN.md)
 - **书籍对话** — 对已解析书籍进行 RAG 问答。以章节**摘要**作为基准上下文传送给 LLM；完整章节内文通过 **tool calling** 按需获取，即使书籍篇幅庞大也能维持低 token 用量。图形以 ID 引用并在对话中内嵌显示。对话记录本地持久化存储。
-- **文字转语音** — 从章节摘要或完整章节内文生成音频。支持 **OpenAI TTS API**（模型：`tts-1`/`tts-1-hd`；语音：alloy、echo、fable、onyx、nova、shimmer）与**本地可执行文件**引擎（Piper、Kokoro 或任何支持 stdin→stdout MP3 的可执行文件）。可在设置页面配置。从书籍详细面板点选「分析结果与 TTS」进入。
+- **文字转语音** — 从章节摘要或完整章节内文生成音频。支持 **OpenAI TTS API**（模型：`tts-1`/`tts-1-hd`；语音：alloy、echo、fable、onyx、nova、shimmer）、**AIVIS**（VOICEVOX 兼容本地服务器）、**Gemini TTS**，以及**本地可执行文件**引擎（Piper、Kokoro 或任何支持 stdin→stdout MP3 的可执行文件）。可在设置页面配置。从书籍详细面板点选「分析结果与 TTS」进入。
 
 ---
 
@@ -45,8 +49,19 @@ Folio 不只是书籍索引工具，它还能**阅读书籍，并和你一起讨
 1. **章节检测** — 识别整份 PDF 的章节边界
 2. **全文提取** — 逐章提取全文（扫描页面使用 VLM OCR）
 3. **图表提取** — 定位并裁切内嵌图片，并为每张图生成文字描述
-4. **章节摘要** — 使用配置的 LLM 为每章生成 ≤300 字摘要
-5. **HTML 导出** — 将摘要、图表与元数据打包成独立 HTML 文件
+4. **章节摘要** — 使用配置的 LLM 为每章生成 ≤300 字摘要；可选的语言设置可输出指定语言的摘要，作为个人阅读辅助，并非对原著的复制或翻译
+5. **HTML 导出** — 将摘要、图表与元数据打包成独立 HTML 文件，仅供个人参考使用
+
+**额外提示词（extra prompt）** 字段让你自定义 AI 解读和摘要书籍的方式。以下是一些示例：
+
+| 提示词 | 效果 |
+|---|---|
+| `"用小学生也能理解的方式解说每一章"` | 语言简化，适合快速掌握陌生领域 |
+| `"每段结尾加「喵」，用猫咪的口吻解说"` | 趣味呈现，帮助记忆枯燥内容 |
+| `"用一个生活中的比喻来说明每章的核心概念"` | 以类比加深理解 |
+| `"每章给我 3 条重点，不要废话"` | 快速复习用的精炼摘要 |
+
+这些输出为个人阅读辅助，请勿对外传播从受著作权保护作品衍生的 AI 生成内容。
 
 分析完成后，打开 **Book Chat** 即可让 AI 陪你讨论这本书的内容。AI 以章节摘要作为基准上下文，并在需要时通过 tool calling 按需获取完整章节内文，在维持低 token 用量的同时，仍能回答具体细节问题。提取的图表会在对话中内嵌显示。
 
@@ -192,10 +207,12 @@ npm run dev
 | `llms.embedding_model` | 用于语义嵌入的模型 | — |
 | `llms.chat_model` | 用于对话功能的模型 | — |
 | `llms.analysis_model` | 深度解析使用的 VLM（图形提取、OCR、图形描述）。未设置时沿用 `extraction_model` | — |
-| `tts.provider` | TTS 引擎：`openai` 或 `local` | `"openai"` |
-| `tts.model` | OpenAI TTS 模型（`tts-1` 或 `tts-1-hd`） | `"tts-1"` |
-| `tts.voice` | OpenAI 语音（`alloy`、`echo`、`fable`、`onyx`、`nova`、`shimmer`） | `"alloy"` |
-| `tts.api_key` | TTS 使用的 OpenAI API 密钥 | `""` |
+| `tts.provider` | TTS 引擎：`openai`、`aivis`、`gemini` 或 `local` | `"openai"` |
+| `tts.model` | TTS 模型（`tts-1`、`tts-1-hd`、`gemini-2.5-flash-preview-tts` 等） | `"tts-1"` |
+| `tts.voice` | 语音名称（OpenAI：`alloy`/`echo`/…；Gemini：`Aoede`/`Charon`/…） | `"alloy"` |
+| `tts.api_key` | API 密钥（`openai` 和 `gemini` 提供商必填） | `""` |
+| `tts.base_url` | AIVIS 服务器基础 URL（例：`http://localhost:10101`） | `""` |
+| `tts.speaker_id` | AIVIS 说话者/风格 ID | `0` |
 | `tts.binary_path` | 本地 TTS 可执行文件路径（`provider: local` 时使用） | `""` |
 | `tts.chunk_size` | 每次 TTS 请求的最大字符数 | `4000` |
 | `search_settings.top_k` | 语义搜索返回结果数 | `10` |
@@ -209,7 +226,7 @@ LLM 提供商字段（适用于 `extraction_model`、`embedding_model`、`chat_m
 
 | 字段 | 说明 |
 |---|---|
-| `provider` | `openai`、`ollama` 或 `anthropic` |
+| `provider` | `openai`、`ollama`、`anthropic` 或 `gemini` |
 | `model_name` | 模型标识符 |
 | `base_url` | API 基础 URL（Ollama 及自定义端点必填） |
 | `api_key` | API 密钥（Ollama 可留空） |
@@ -288,6 +305,22 @@ LLM 提供商字段（适用于 `extraction_model`、`embedding_model`、`chat_m
 | 扫描 PDF 图表提取准确度 | 扫描页面的图表边界检测依赖 VLM 边界框推断，可能发生区域误判或图表遗漏。原生 PDF（含文字层）的准确度较高。 |
 | 图表提取推荐模型 | 目前测试中，**Qwen2-VL / Qwen3** 在图表检测准确度上优于其他模型（如 LLaVA、Gemma）。 |
 | 大型书籍 token 用量 | 深度解析会依序处理每一页，书籍页数较多（500页以上）时，依模型与供应商不同，所需时间与 token 消耗可能相当可观。 |
+
+---
+
+## 法律声明
+
+> **本声明不构成法律建议。如有具体法律疑虑，请咨询合格律师。**
+
+**仅供个人使用。** Folio 是一款自托管个人书库管理工具，设计用途为管理用户依法拥有的书籍与文件，不得用于复制、再分发或商业利用他人受著作权保护的作品。
+
+**内容合法性责任由用户自负。** 用户须自行确认对加入 Folio 的任何文件拥有合法的存储、索引与处理权利。本项目作者不支持、也不鼓励将本工具用于未经授权获取的资料。
+
+**第三方服务隐私声明。** 使用云端 LLM 提供商（OpenAI、Anthropic、Google Gemini 等）时，书籍的文字内容（包含提取的段落与摘要）将传送至该提供商的服务器进行处理。使用前请详阅各提供商的隐私政策与服务条款。如需完全在本地处理数据，请通过 [Ollama](https://ollama.ai) 使用本地模型。
+
+**翻译与演绎作品。** 语言输出选项所生成的是 AI 对书籍内容的摘要解读，以指定语言呈现，目的是辅助用户理解其合法持有的著作，并非对原文的完整复制或翻译。依多数著作权法制，翻译权属著作权人专有（如《伯尔尼公约》第 8 条）。用户不得利用本功能制作、传播或发布受著作权保护作品的翻译版本或其他演绎作品，除非已获得著作权人的授权。
+
+**无担保声明。** 本软件依现状提供，不附任何形式的担保。详见下方 [MIT 许可证](#许可证) 条款。
 
 ---
 

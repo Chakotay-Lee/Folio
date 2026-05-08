@@ -1,6 +1,6 @@
 [project]
 name = "folio-backend"
-version = "0.2.0"
+version = "0.2.dev.1"
 description = "Folio — Smart Personal Library System backend"
 requires-python = ">=3.10"
 dependencies = [
