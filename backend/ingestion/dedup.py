@@ -26,8 +26,13 @@ def compute_simhash(text: str) -> str:
     return str(int(hashlib.sha256(text.encode('utf-8', errors='replace')).hexdigest()[:16], 16))
 
 
+_MIN_TEXT_FOR_DEDUP = 200  # chars — below this the text is too sparse for SimHash to be meaningful
+
+
 def is_duplicate(text: str, existing_hashes: list[str], threshold: float = DUPLICATE_THRESHOLD) -> bool:
     if not existing_hashes:
+        return False
+    if len(text.strip()) < _MIN_TEXT_FOR_DEDUP:
         return False
     candidate = _make_simhash(text)
     if candidate is None:

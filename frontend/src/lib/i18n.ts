@@ -46,6 +46,7 @@ const en = {
   'browse.noMatch': 'No books match your filter.',
   'browse.empty': 'No books indexed yet.',
   'browse.count': (n: number) => `${n} book${n !== 1 ? 's' : ''}`,
+  'browse.filter': 'Filter',
 
   // Pagination
   'page.info': (page: number, pages: number, total: number) =>
@@ -245,11 +246,13 @@ const en = {
 
   // Folders page extras
   'folder.title': 'Watch Folders',
-  'folder.subtitle': 'New files are auto-imported. Use Scan Now to process existing files.',
+  'folder.subtitle': 'Watching folders auto-import new files in real time. Indexed-only folders are scanned only when you click Scan Now.',
   'folder.supportedFiles': (n: number) => `${n} supported file${n !== 1 ? 's' : ''}`,
   'folder.notFound': 'Folder not found',
   'folder.watching': 'Watching',
+  'folder.watchingTip': 'Monitors for new files and imports them automatically',
   'folder.indexedOnly': 'Indexed only',
+  'folder.indexedOnlyTip': 'Not monitored — only scanned when you click Scan Now',
   'folder.folderExists': 'exists',
   'folder.folderMissing': 'missing',
   'folder.totalIndexed': (n: number) => `${n} book${n !== 1 ? 's' : ''} indexed in total`,
@@ -292,6 +295,7 @@ const zhTW: Translations = {
   'browse.noMatch': '沒有符合條件的書藉。',
   'browse.empty': '尚未建立索引。',
   'browse.count': (n: number) => `${n} 本書`,
+  'browse.filter': '篩選',
 
   'page.info': (page: number, pages: number, total: number) =>
     `第 ${page} 頁，共 ${pages} 頁（${total} 本書）`,
@@ -480,11 +484,13 @@ const zhTW: Translations = {
   'disc.title': '探索',
 
   'folder.title': '監控資料夾',
-  'folder.subtitle': '有新檔案時自動匯入。點擊「立即掃描」處理現有檔案。',
+  'folder.subtitle': '「監控中」資料夾會即時偵測新檔案並自動匯入；「僅索引」資料夾須手動按「立即掃描」才會處理。',
   'folder.supportedFiles': (n: number) => `${n} 個支援的檔案`,
   'folder.notFound': '找不到資料夾',
   'folder.watching': '監控中',
+  'folder.watchingTip': '持續監控，新增檔案時自動匯入',
   'folder.indexedOnly': '僅索引',
+  'folder.indexedOnlyTip': '不自動監控，只在按下「立即掃描」時才會掃描',
   'folder.folderExists': '存在',
   'folder.folderMissing': '遺失',
   'folder.totalIndexed': (n: number) => `共索引 ${n} 本書`,
@@ -527,6 +533,7 @@ const zhCN: Translations = {
   'browse.noMatch': '没有符合条件的书籍。',
   'browse.empty': '尚未建立索引。',
   'browse.count': (n: number) => `${n} 本书`,
+  'browse.filter': '筛选',
 
   'page.info': (page: number, pages: number, total: number) =>
     `第 ${page} 页，共 ${pages} 页（${total} 本书）`,
@@ -715,11 +722,13 @@ const zhCN: Translations = {
   'disc.title': '探索',
 
   'folder.title': '监控文件夹',
-  'folder.subtitle': '有新文件时自动导入。点击「立即扫描」处理现有文件。',
+  'folder.subtitle': '「监控中」文件夹会实时检测新文件并自动导入；「仅索引」文件夹需手动点击「立即扫描」才会处理。',
   'folder.supportedFiles': (n: number) => `${n} 个支持的文件`,
   'folder.notFound': '找不到文件夹',
   'folder.watching': '监控中',
+  'folder.watchingTip': '持续监控，新增文件时自动导入',
   'folder.indexedOnly': '仅索引',
+  'folder.indexedOnlyTip': '不自动监控，只在点击「立即扫描」时才扫描',
   'folder.folderExists': '存在',
   'folder.folderMissing': '缺失',
   'folder.totalIndexed': (n: number) => `共索引 ${n} 本书`,
@@ -762,6 +771,7 @@ const ja: Translations = {
   'browse.noMatch': '条件に一致する本がありません。',
   'browse.empty': 'インデックスされた本がありません。',
   'browse.count': (n: number) => `${n} 冊`,
+  'browse.filter': 'フィルター',
 
   'page.info': (page: number, pages: number, total: number) =>
     `${page} / ${pages} ページ（全 ${total} 冊）`,
@@ -950,11 +960,13 @@ const ja: Translations = {
   'disc.title': '発見',
 
   'folder.title': 'ウォッチフォルダ',
-  'folder.subtitle': '新しいファイルは自動的にインポートされます。既存のファイルを処理するには「今すぐスキャン」をクリックしてください。',
+  'folder.subtitle': '「監視中」フォルダは新しいファイルをリアルタイムで自動インポートします。「インデックスのみ」フォルダは「今すぐスキャン」をクリックしたときのみ処理されます。',
   'folder.supportedFiles': (n: number) => `対応ファイル ${n} 件`,
   'folder.notFound': 'フォルダが見つかりません',
   'folder.watching': '監視中',
+  'folder.watchingTip': '新しいファイルを自動的に検出してインポートします',
   'folder.indexedOnly': 'インデックスのみ',
+  'folder.indexedOnlyTip': '自動監視なし — 「今すぐスキャン」のときのみスキャン',
   'folder.folderExists': '存在する',
   'folder.folderMissing': '見つからない',
   'folder.totalIndexed': (n: number) => `合計 ${n} 冊インデックス済み`,

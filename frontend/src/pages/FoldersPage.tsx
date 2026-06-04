@@ -146,12 +146,12 @@ export function FoldersPage() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {f.watched && (
-                <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium">
+                <span title={t('folder.watchingTip') as string} className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium cursor-default">
                   <Eye className="w-3 h-3" /> {t('folder.watching') as string}
                 </span>
               )}
               {!f.watched && (
-                <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                <span title={t('folder.indexedOnlyTip') as string} className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200 cursor-default">
                   {t('folder.indexedOnly') as string}
                 </span>
               )}

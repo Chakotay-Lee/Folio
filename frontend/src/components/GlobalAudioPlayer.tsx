@@ -44,7 +44,7 @@ export function GlobalAudioPlayer() {
   const VolumeIcon = volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 h-16 bg-slate-900 border-t border-slate-800 flex items-center px-5 gap-4 shadow-2xl">
+    <div className="fixed bottom-16 md:bottom-0 left-0 right-0 z-50 h-16 bg-slate-900 border-t border-slate-800 flex items-center px-5 gap-4 shadow-2xl">
 
       {/* Track info */}
       <div className="w-48 shrink-0 min-w-0">

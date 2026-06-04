@@ -39,11 +39,13 @@ async def _watch_loop(paths: list[Path], config) -> None:
 
 def _ingest(path: Path, config) -> None:
     from backend.ingestion.pipeline import ingest_file
+    from backend.ingestion.log_store import append_log, IngestionLog
     try:
         result = ingest_file(path, config)
         logger.info("Auto-ingested %s: %s", path.name, result.status)
     except Exception as e:
         logger.error("Auto-ingest failed for %s: %s", path.name, e)
+        append_log(IngestionLog(uuid="", title=path.name, status="error", message=str(e)))
 
 
 def start_watcher(paths: list[Path], config) -> None:

@@ -53,7 +53,13 @@ def ingest_file(file_path: str | Path, config) -> IngestionResult:
         logger.debug("Skipping already-indexed file: %s", relative_path)
         return IngestionResult(uuid=already.id, title=already.title, status="skipped", message="Already indexed")
 
-    text = extract_text(path, max_pages=config.search.max_pages_to_analyze)
+    try:
+        text = extract_text(path, max_pages=config.search.max_pages_to_analyze)
+    except Exception as e:
+        result = IngestionResult(uuid="", title=path.name, status="error", message=f"Text extraction failed: {e}")
+        append_log(IngestionLog(**result.__dict__))
+        logger.error("Ingestion failed for %s: %s", path.name, e)
+        return result
 
     with get_core_session() as session:
         existing_hashes = get_all_simhashes(session)
@@ -71,11 +77,20 @@ def ingest_file(file_path: str | Path, config) -> IngestionResult:
         ).all())
         provider = get_provider(config.llms.extraction_model)
         language = getattr(config, 'content_language', 'en')
-        try:
-            metadata = provider.extract_metadata(text, existing_genres=existing_genres, language=language)
-        except Exception as e:
-            logger.warning("LLM metadata extraction failed: %s — using filename fallback", e)
+        if not text.strip():
+            logger.warning("No text extracted from %s — using filename fallback without LLM", path.name)
             metadata = {"title": path.stem, "author": None, "summary": "", "tags": [], "genre_path": ""}
+        else:
+            try:
+                metadata = provider.extract_metadata(
+                    text,
+                    existing_genres=existing_genres,
+                    language=language,
+                    filename_hint=path.stem,
+                )
+            except Exception as e:
+                logger.warning("LLM metadata extraction failed: %s — using filename fallback", e)
+                metadata = {"title": path.stem, "author": None, "summary": "", "tags": [], "genre_path": ""}
 
         import json
         book_uuid = str(_uuid.uuid4())

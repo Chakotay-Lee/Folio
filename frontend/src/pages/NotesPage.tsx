@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { BookOpen, ChevronDown, CheckCircle2, AlertTriangle, Loader2, Info } from 'lucide-react'
+import { BookOpen, ChevronDown, CheckCircle2, AlertTriangle, Loader2, Info, SlidersHorizontal, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { parseTags, tagColor } from '@/lib/bookUtils'
@@ -42,6 +42,7 @@ export function NotesPage() {
   const [detailBook, setDetailBook] = useState<DetailBook | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [expandingGenre, setExpandingGenre] = useState<string | null>(null)
+  const [filterOpen, setFilterOpen] = useState(false)
 
   // Load sidebar data + config once
   useEffect(() => {
@@ -106,52 +107,101 @@ export function NotesPage() {
     api.get<GenreEntry[]>('/books/genres').then(setGenreData).catch(() => {})
   }
 
+  // Sidebar content shared between desktop sidebar and mobile bottom sheet
+  const sidebarContent = (
+    <div className="p-4 space-y-5">
+      <div className="space-y-1">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t('browse.genre') as string}</p>
+        <button
+          onClick={() => { setSelectedGenrePath(null); setSelectedTag(null); setPage(1); setFilterOpen(false) }}
+          className={cn('w-full text-left px-2.5 py-1.5 rounded-lg text-sm transition-colors',
+            !selectedGenrePath ? 'bg-amber-400/10 text-amber-700 font-medium' : 'text-slate-500 hover:bg-slate-100'
+          )}>
+          {(t('browse.all') as (n: number) => string)(total)}
+        </button>
+        {genreTree.map(node => (
+          <GenreTreeNode key={node.fullPath} node={node}
+            selected={selectedGenrePath}
+            onSelect={(path) => { handleGenreSelect(path); setFilterOpen(false) }}
+            onExpand={setExpandingGenre} />
+        ))}
+      </div>
+      {allTags.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t('browse.topTags') as string}</p>
+          {allTags.slice(0, 20).map(({ tag, count }) => (
+            <button key={tag}
+              onClick={() => { setSelectedTag(selectedTag === tag ? null : tag); setSelectedGenrePath(null); setPage(1); setFilterOpen(false) }}
+              className={cn('w-full text-left px-2.5 py-1.5 rounded-lg text-sm transition-colors truncate',
+                selectedTag === tag ? 'bg-amber-400/10 text-amber-700 font-medium' : 'text-slate-500 hover:bg-slate-100'
+              )}>
+              {tag}
+              <span className="ml-1 text-xs opacity-60">·{count}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  const filterCount = (selectedGenrePath ? 1 : 0) + (selectedTag ? 1 : 0)
+
   return (
     <div className="flex h-full">
-      {/* Sidebar */}
-      <div className="w-56 shrink-0 border-r border-slate-200 bg-white overflow-y-auto">
-        <div className="p-4 space-y-5">
-          {/* Genre tree */}
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t('browse.genre') as string}</p>
-            <button
-              onClick={() => { setSelectedGenrePath(null); setSelectedTag(null); setPage(1) }}
-              className={cn('w-full text-left px-2.5 py-1.5 rounded-lg text-sm transition-colors',
-                !selectedGenrePath ? 'bg-amber-400/10 text-amber-700 font-medium' : 'text-slate-500 hover:bg-slate-100'
-              )}>
-              {(t('browse.all') as (n: number) => string)(total)}
-            </button>
-            {genreTree.map(node => (
-              <GenreTreeNode key={node.fullPath} node={node}
-                selected={selectedGenrePath}
-                onSelect={handleGenreSelect}
-                onExpand={setExpandingGenre} />
-            ))}
-          </div>
-
-          {/* Tags */}
-          {allTags.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t('browse.topTags') as string}</p>
-              {allTags.slice(0, 20).map(({ tag, count }) => (
-                <button key={tag}
-                  onClick={() => { setSelectedTag(selectedTag === tag ? null : tag); setSelectedGenrePath(null); setPage(1) }}
-                  className={cn('w-full text-left px-2.5 py-1.5 rounded-lg text-sm transition-colors truncate',
-                    selectedTag === tag ? 'bg-amber-400/10 text-amber-700 font-medium' : 'text-slate-500 hover:bg-slate-100'
-                  )}>
-                  {tag}
-                  <span className="ml-1 text-xs opacity-60">·{count}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Desktop sidebar */}
+      <div className="hidden md:block w-56 shrink-0 border-r border-slate-200 bg-white overflow-y-auto">
+        {sidebarContent}
       </div>
 
+      {/* Mobile bottom sheet overlay */}
+      {filterOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-50 flex flex-col justify-end"
+          onClick={() => setFilterOpen(false)}
+        >
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative bg-white rounded-t-2xl max-h-[75vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
+              <span className="font-semibold text-slate-800 text-sm">{t('browse.filter') as string}</span>
+              {filterCount > 0 && (
+                <button
+                  onClick={() => { clearFilters(); setFilterOpen(false) }}
+                  className="text-xs text-amber-600 hover:text-amber-700 font-medium">
+                  {t('browse.clear') as string}
+                </button>
+              )}
+              <button onClick={() => setFilterOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto">{sidebarContent}</div>
+          </div>
+        </div>
+      )}
+
       {/* Main */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-3xl mx-auto space-y-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {/* Mobile filter button */}
+            <button
+              onClick={() => setFilterOpen(true)}
+              className={cn(
+                'md:hidden shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm border shadow-sm transition-colors',
+                filterCount > 0
+                  ? 'bg-amber-400/10 border-amber-300 text-amber-700'
+                  : 'bg-white border-slate-200 text-slate-500'
+              )}>
+              <SlidersHorizontal className="w-4 h-4" />
+              {filterCount > 0 && (
+                <span className="w-4 h-4 rounded-full bg-amber-400 text-slate-900 text-[10px] font-bold flex items-center justify-center">
+                  {filterCount}
+                </span>
+              )}
+            </button>
             <input
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
@@ -160,7 +210,7 @@ export function NotesPage() {
             />
             {hasFilter && (
               <button onClick={clearFilters}
-                className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-xl shadow-sm transition-colors">
+                className="shrink-0 px-3 py-2 text-xs text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-xl shadow-sm transition-colors">
                 {t('browse.clear') as string}
               </button>
             )}

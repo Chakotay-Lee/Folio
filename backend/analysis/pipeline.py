@@ -14,6 +14,81 @@ log = logging.getLogger(__name__)
 _CODE_BLOCK_RE = re.compile(r'```(\w*)\s*\n(.*?)\n```', re.DOTALL)
 _BODY_RE = re.compile(r'<body>(.*?)</body>', re.DOTALL | re.IGNORECASE)
 
+# ── Cross-page paragraph joining ──────────────────────────────────────────────
+_PAGE_SPLIT_RE  = re.compile(r'\[\[PAGE:(\d+)\]\]\n?')
+# Sentence-ending punctuation (CJK + Latin)
+_SENT_END_RE    = re.compile(r'[.。!！?？…」』\)\）]+\s*$')
+# Structural block starters — never merge these with the previous page
+_NEW_BLOCK_RE   = re.compile(r'^(#{1,6}\s|[-*•]\s|\d+[.)]\s|\|)')
+
+
+def _join_cross_page_paragraphs(text: str) -> str:
+    """Stitch paragraphs that were split at page boundaries.
+
+    When page N ends mid-sentence, the continuation (first paragraph of page
+    N+1) is moved *before* the [[PAGE:N+1]] marker so:
+    - html_builder renders a complete paragraph inside page N's segment
+    - the [[PAGE:N+1]] anchor stays in place for image injection
+    - ch_XX.txt / chat context reads as coherent prose
+
+    Handles English end-of-line hyphenation (``word-`` → ``word``).
+    Does NOT touch boundaries where the previous page ends with sentence
+    punctuation or where the next page starts a heading / list / table.
+    """
+    parts = _PAGE_SPLIT_RE.split(text)
+    # parts = [pre, num1, seg1, num2, seg2, ...]
+    if len(parts) < 5:          # fewer than 2 page markers — nothing to join
+        return text
+
+    pre = parts[0]
+    segs: list[list[str]] = []
+    i = 1
+    while i + 1 < len(parts):
+        segs.append([parts[i], parts[i + 1]])
+        i += 2
+
+    for idx in range(len(segs) - 1):
+        prev_seg = segs[idx][1]
+        next_seg = segs[idx + 1][1]
+
+        prev_nonempty = [l for l in prev_seg.rstrip().splitlines() if l.strip()]
+        next_stripped  = next_seg.lstrip('\n')
+        next_nonempty  = [l for l in next_stripped.splitlines() if l.strip()]
+
+        if not prev_nonempty or not next_nonempty:
+            continue
+
+        last  = prev_nonempty[-1].rstrip()
+        first = next_nonempty[0].lstrip()
+
+        if _SENT_END_RE.search(last):   # sentence completed → no join
+            continue
+        if _NEW_BLOCK_RE.match(first):  # new structural element → no join
+            continue
+
+        # Isolate the first paragraph of next_seg (up to first blank line)
+        double_nl = next_stripped.find('\n\n')
+        if double_nl == -1:
+            first_para, rest = next_stripped.rstrip(), ''
+        else:
+            first_para = next_stripped[:double_nl]
+            rest = next_stripped[double_nl + 2:]
+
+        # Join with space (or directly if prev line is hyphenated)
+        prev_body = prev_seg.rstrip('\n').rstrip()
+        if prev_body.endswith('-'):
+            joined = prev_body[:-1] + first_para
+        else:
+            joined = prev_body + ' ' + first_para
+
+        segs[idx][1]     = joined + '\n'
+        segs[idx + 1][1] = (rest + '\n') if rest.strip() else '\n'
+
+    out = pre
+    for num, seg in segs:
+        out += f'[[PAGE:{num}]]\n{seg}'
+    return out
+
 # ── LaTeX auto-wrap ────────────────────────────────────────────────────────────
 _MATH_PROT_RE = re.compile(r'\$\$[\s\S]*?\$\$|\$[^\n$]+?\$')
 # Match contiguous ASCII "math chars" (CJK acts as natural boundary)
@@ -263,7 +338,14 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg, opts: AnalysisOptions | No
         init_manifest(analysis_dir, book_uuid, total_pages)
 
         # Determine LLM providers (options may override config)
-        analysis_model_cfg = cfg.llms.analysis_model or cfg.llms.extraction_model
+        if not cfg.llms.analysis_model and not opts.analysis_model:
+            raise RuntimeError(
+                "No VLM configured for deep analysis. Add 'analysis_model' under 'llms' in "
+                "config.json pointing to a vision-capable model (e.g. Qwen3.5-VL). "
+                "Deep analysis requires a VLM for scanned page OCR and figure detection — "
+                "refusing to fall back to a text-only model."
+            )
+        analysis_model_cfg = cfg.llms.analysis_model
         analysis_provider = (
             _build_provider(opts.analysis_model, analysis_model_cfg)
             if opts.analysis_model else get_provider(analysis_model_cfg)
@@ -344,14 +426,16 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg, opts: AnalysisOptions | No
                 page_img = PILImage.open(io.BytesIO(img_bytes))
                 page_w, page_h = page_img.size
 
-                # OCR text
+                # OCR text — failure is fatal: continuing with empty text produces hallucinated output
+                from backend.analysis.image_extractor import _pil_to_b64, _call_vlm
+                b64 = _pil_to_b64(page_img)
                 try:
-                    from backend.analysis.image_extractor import _pil_to_b64, _call_vlm
-                    b64 = _pil_to_b64(page_img)
                     ocr_text = _call_vlm(analysis_provider, ocr_prompt, b64)
                 except Exception as e:
-                    log.warning("OCR failed page %d: %s", page_num, e)
-                    ocr_text = ""
+                    raise RuntimeError(
+                        f"VLM OCR failed on page {page_num + 1} of '{pdf_path.name}': {e}. "
+                        "Fix 'analysis_model' in config.json or ensure the VLM server is running."
+                    ) from e
 
                 # Guard against VLM repetition loops producing runaway output
                 if len(ocr_text) > _OCR_MAX_CHARS:
@@ -427,6 +511,8 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg, opts: AnalysisOptions | No
                 # Skip TOC chapter here — its entries are combined after doc.close()
                 if finished_ch_idx != toc_ch_idx and ch_obj and ch_acc.strip():
                     job.stage = f"summarizing_ch_{finished_ch_idx}"
+                    ch_acc = _join_cross_page_paragraphs(ch_acc)
+                    ch_texts[finished_ch_idx] = ch_acc
                     summary = summarize_chapter(
                         ch_acc, extraction_provider, ch_obj.title,
                         language=opts.language, extra_prompt=opts.extra_prompt,
@@ -462,6 +548,11 @@ def run_analysis(book_uuid: str, pdf_path: Path, cfg, opts: AnalysisOptions | No
                 removed = before - len(all_images)
                 if removed:
                     log.info("TOC: removed %d images from TOC chapter pages", removed)
+
+        # ── Join cross-page paragraphs (for chapters not yet joined in-loop) ──
+        for ch in chapters:
+            if ch.index not in summarized_chapters and ch.index in ch_texts:
+                ch_texts[ch.index] = _join_cross_page_paragraphs(ch_texts[ch.index])
 
         # ── Write chapter text files ───────────────────────────────────────
         job.stage = "writing_text"

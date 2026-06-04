@@ -13,14 +13,15 @@ def init_ocr(config) -> None:
 
 def run_ocr(img_bytes: bytes) -> str:
     if _config is None:
-        logger.warning("OCR not initialised — call init_ocr(config) first")
-        return ""
+        raise RuntimeError("OCR not initialised — call init_ocr(config) first")
 
-    # Use dedicated ocr_model if configured, otherwise fall back to extraction_model
-    model_cfg = _config.llms.ocr_model or _config.llms.extraction_model
+    model_cfg = _config.llms.ocr_model
     if not model_cfg:
-        logger.warning("No OCR model configured")
-        return ""
+        raise RuntimeError(
+            "No VLM configured for OCR. Add 'ocr_model' under 'llms' in config.json "
+            "pointing to a vision-capable model (e.g. Qwen3.5-VL). "
+            "OCR on scanned pages requires a VLM — refusing to fall back to a text-only model."
+        )
 
     try:
         from openai import OpenAI
@@ -49,5 +50,4 @@ def run_ocr(img_bytes: bytes) -> str:
         )
         return response.choices[0].message.content or ""
     except Exception as e:
-        logger.error("VLM OCR failed: %s", e)
-        return ""
+        raise RuntimeError(f"VLM OCR failed ({model_cfg.model_name}): {e}") from e

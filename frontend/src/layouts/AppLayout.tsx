@@ -22,7 +22,8 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen bg-stone-50">
-      <aside className="w-56 shrink-0 bg-slate-900 flex flex-col">
+      {/* Desktop sidebar — hidden on mobile */}
+      <aside className="hidden md:flex w-56 shrink-0 bg-slate-900 flex-col">
         <div className="px-4 py-5 border-b border-slate-800">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-amber-400 rounded-lg flex items-center justify-center shrink-0">
@@ -61,9 +62,35 @@ export function AppLayout() {
         </div>
       </aside>
 
-      <main className={cn('flex-1 overflow-y-auto', currentTrack && 'pb-16')}>
+      {/* Main content */}
+      <main className={cn(
+        'flex-1 overflow-y-auto',
+        currentTrack ? 'pb-36 md:pb-16' : 'pb-16 md:pb-0',
+      )}>
         <Outlet />
       </main>
+
+      {/* Mobile bottom tab bar — hidden on desktop */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-900 border-t border-slate-800 flex items-stretch safe-bottom">
+        {navItems.map(({ to, label, icon: Icon, end }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            className={({ isActive }) =>
+              cn(
+                'flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] transition-colors min-w-0',
+                isActive
+                  ? 'text-amber-400'
+                  : 'text-slate-500 hover:text-slate-300'
+              )
+            }
+          >
+            <Icon className="w-5 h-5 shrink-0" />
+            <span className="truncate w-full text-center leading-tight">{label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   )
 }

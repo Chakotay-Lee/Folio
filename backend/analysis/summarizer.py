@@ -38,11 +38,6 @@ def summarize_chapter(
     )
 
     try:
-        result = provider.extract_metadata.__func__  # check if it's a proper provider
-    except AttributeError:
-        pass
-
-    try:
         # Use raw completion if the provider exposes it; otherwise fall back to extract_metadata
         if hasattr(provider, "complete"):
             summary = provider.complete(prompt)
